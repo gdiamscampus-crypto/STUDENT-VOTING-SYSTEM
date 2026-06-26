@@ -1,0 +1,6 @@
+{
+  "name": "Student Voting & Audio System",
+  "description": "A school election portal equipped with professional, fully-synthesized and customizable audio feedback and sounds.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

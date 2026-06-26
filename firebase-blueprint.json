@@ -1,0 +1,105 @@
+{
+  "entities": {
+    "Position": {
+      "title": "Position",
+      "description": "An election post/position name",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "Candidate": {
+      "title": "Candidate",
+      "description": "An election candidate",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "positionId": { "type": "string" },
+        "name": { "type": "string" },
+        "grade": { "type": "string" },
+        "division": { "type": "string" },
+        "rollNumber": { "type": "string" },
+        "symbol": { "type": "string" },
+        "bio": { "type": "string" },
+        "manifesto": { "type": "string" },
+        "avatarSeed": { "type": "string" },
+        "colorTheme": { "type": "string" },
+        "votesCount": { "type": "number" },
+        "photoUrl": { "type": "string" }
+      },
+      "required": ["id", "positionId", "name", "grade", "division", "rollNumber", "symbol", "bio", "manifesto", "avatarSeed", "colorTheme", "votesCount"]
+    },
+    "Vote": {
+      "title": "Vote",
+      "description": "A student vote",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "positionId": { "type": "string" },
+        "candidateId": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "studentId", "studentName", "positionId", "candidateId", "timestamp"]
+    },
+    "AdmittedStudent": {
+      "title": "AdmittedStudent",
+      "description": "A student officially admitted to the school with voting rights",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "pin": { "type": "string" }
+      },
+      "required": ["id", "name", "pin"]
+    },
+    "ElectionSetting": {
+      "title": "ElectionSetting",
+      "description": "Election configuration settings",
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["setup", "active", "ended"] }
+      },
+      "required": ["status"]
+    },
+    "AudioSetting": {
+      "title": "AudioSetting",
+      "description": "Audio configuration settings",
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "volume": { "type": "number" }
+      },
+      "required": ["enabled", "volume"]
+    }
+  },
+  "firestore": {
+    "positions/{positionId}": {
+      "schema": "Position",
+      "description": "The election positions/posts"
+    },
+    "candidates/{candidateId}": {
+      "schema": "Candidate",
+      "description": "The candidates collection"
+    },
+    "votes/{voteId}": {
+      "schema": "Vote",
+      "description": "The votes collection"
+    },
+    "admitted_students/{studentId}": {
+      "schema": "AdmittedStudent",
+      "description": "Official school admissions list"
+    },
+    "settings/election": {
+      "schema": "ElectionSetting",
+      "description": "Election status setting doc"
+    },
+    "settings/audio": {
+      "schema": "AudioSetting",
+      "description": "Audio config setting doc"
+    }
+  }
+}
