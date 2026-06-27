@@ -7,6 +7,7 @@ import { useState, FormEvent } from 'react';
 import { motion } from 'motion/react';
 import { ShieldCheck, Lock, Eye, EyeOff, AlertTriangle, KeyRound } from 'lucide-react';
 import { playSystemSound } from '../audio';
+import InsightLogo from './InsightLogo';
 
 interface AdminLoginProps {
   correctPasswordHash: string; // The hashed/stored admin password
@@ -47,11 +48,9 @@ export default function AdminLogin({ correctPasswordHash, onLoginSuccess }: Admi
       id="admin-login-card"
     >
       <div className="text-center">
-        <div className="inline-flex items-center justify-center p-3 bg-indigo-50 rounded-2xl text-indigo-600 mb-3 animate-pulse">
-          <ShieldCheck className="h-7 w-7" id="login-shield-icon" />
-        </div>
-        <h2 className="text-xl font-black text-slate-900 tracking-tight">Admin Authorization</h2>
-        <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+        <InsightLogo layout="vertical" className="mb-4 scale-95" />
+        <h2 className="text-xs font-bold text-slate-400 tracking-wider uppercase border-t border-slate-100 pt-4">Admin Authorization</h2>
+        <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
           Accessing candidate lists, voter rolls, custom synthesized chimes, and election configurations requires a secret passcode.
         </p>
       </div>

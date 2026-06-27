@@ -16,6 +16,7 @@ import StudentPortal from './components/StudentPortal';
 import AdminPortal from './components/AdminPortal';
 import AdminLogin from './components/AdminLogin';
 import AudioVisualizer from './components/AudioVisualizer';
+import InsightLogo from './components/InsightLogo';
 import { Vote as VoteIcon, ShieldCheck, HelpCircle, Activity, Award, CheckCircle } from 'lucide-react';
 import { db, collection, doc, onSnapshot, setDoc, updateDoc, getDoc, getDocs, writeBatch, deleteDoc, handleFirestoreError, OperationType } from './firebase';
 
@@ -519,6 +520,41 @@ export default function App() {
     sessionStorage.removeItem('isAdminAuthenticated');
   };
 
+  if (positions.length === 0 || candidates.length === 0) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans" id="loading-screen">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.3 }}
+          className="bg-white rounded-3xl shadow-xl border border-slate-100 p-8 max-w-md w-full text-center space-y-6"
+        >
+          <div className="flex flex-col items-center justify-center space-y-2">
+            <div className="relative inline-flex items-center justify-center">
+              <InsightLogo layout="icon-only" height={64} className="animate-bounce" />
+              <div className="absolute inset-0 rounded-3xl border-4 border-[#13a5e1]/20 animate-ping"></div>
+            </div>
+          </div>
+          <div>
+            <InsightLogo layout="vertical" className="scale-95" />
+            <h2 className="text-sm font-black text-slate-400 tracking-wider uppercase mt-6 border-t border-slate-100 pt-4">Smart School Election System</h2>
+            <p className="text-xs text-indigo-600 font-bold uppercase tracking-wider mt-1 animate-pulse">
+              Loading election data...
+            </p>
+          </div>
+          <p className="text-xs text-slate-400 max-w-xs mx-auto leading-relaxed">
+            Initializing secure real-time ballot register databases, student verification rosters, and high-fidelity audio synthesis engine...
+          </p>
+          <div className="flex justify-center items-center gap-2">
+            <span className="h-2 w-2 bg-indigo-600 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+            <span className="h-2 w-2 bg-indigo-600 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+            <span className="h-2 w-2 bg-indigo-600 rounded-full animate-bounce"></span>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50/50 text-slate-800 font-sans flex flex-col justify-between" id="app-root-container">
       
@@ -527,18 +563,19 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
           
           {/* Logo & Portal Brand */}
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-600/10">
-              <VoteIcon className="h-5 w-5" id="header-brand-icon" />
+          <div className="flex items-center gap-4">
+            <InsightLogo layout="horizontal" height={44} className="border-r border-slate-200/60 pr-4 mr-1 hidden md:flex" />
+            <div className="md:hidden">
+              <InsightLogo layout="icon-only" height={40} />
             </div>
             <div>
               <h1 className="text-base font-black text-slate-900 tracking-tight flex items-center gap-1.5">
-                CivicPulse
+                Smart School Election System
                 <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full uppercase tracking-wider">
                   V.3.5
                 </span>
               </h1>
-              <p className="text-[10px] text-slate-400 font-medium">Student Election Portal with High-Fidelity Audio</p>
+              <p className="text-[10px] text-slate-400 font-medium">Secure Real-Time Student Ballot with High-Fidelity Audio Feedback</p>
             </div>
           </div>
 
@@ -654,7 +691,7 @@ export default function App() {
       {/* FOOTER BAR */}
       <footer className="bg-white border-t border-slate-100 py-6 text-center text-xs text-slate-400 font-medium" id="main-app-footer">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row justify-between items-center gap-4">
-          <p>🏫 CivicPulse © 2026. Made with professional HTML5 Web Audio synthesis.</p>
+          <p>🏫 Smart School Election System © 2026. Made with professional HTML5 Web Audio synthesis.</p>
           <div className="flex items-center gap-4">
             <span className="flex items-center gap-1">
               <CheckCircle className="h-3.5 w-3.5 text-emerald-500" />

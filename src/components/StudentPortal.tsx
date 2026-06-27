@@ -9,6 +9,7 @@ import { Candidate, Vote, StudentSession, AdmittedStudent, Position } from '../t
 import { playSystemSound } from '../audio';
 import { User, ShieldAlert, CheckCircle, Award, Sparkles, ChevronRight, ChevronLeft, LogOut, FileText, Check } from 'lucide-react';
 import Confetti from './Confetti';
+import InsightLogo from './InsightLogo';
 
 interface StudentPortalProps {
   positions: Position[];
@@ -200,11 +201,9 @@ export default function StudentPortal({
             id="student-login-card"
           >
             <div className="text-center">
-              <div className="inline-flex items-center justify-center p-3 bg-indigo-50 rounded-xl text-indigo-600 mb-3">
-                <User className="h-6 w-6" id="login-user-icon" />
-              </div>
-              <h2 className="text-xl font-bold text-slate-800 tracking-tight">Student Voting Portal</h2>
-              <p className="text-xs text-slate-500 mt-1">Authenticate using your unique Student Admission ID and PIN</p>
+              <InsightLogo layout="vertical" className="mb-4 scale-95" />
+              <h2 className="text-xs font-bold text-slate-400 tracking-wider uppercase border-t border-slate-100 pt-4">Smart School Election System</h2>
+              <p className="text-[11px] text-slate-400 mt-1">Authenticate using your unique Student Admission ID and PIN</p>
             </div>
 
             <form onSubmit={handleLogin} className="space-y-4">
