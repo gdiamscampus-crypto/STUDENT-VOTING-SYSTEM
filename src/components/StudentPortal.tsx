@@ -5,7 +5,7 @@
 
 import { useState, FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Candidate, Vote, StudentSession, AdmittedStudent, Position } from '../types';
+import { Candidate, Vote, StudentSession, Student, Position } from '../types';
 import { playSystemSound } from '../audio';
 import { User, ShieldAlert, CheckCircle, Award, Sparkles, ChevronRight, ChevronLeft, LogOut, FileText, Check } from 'lucide-react';
 import Confetti from './Confetti';
@@ -17,7 +17,7 @@ interface StudentPortalProps {
   onVotesSubmitted: (votes: Vote[]) => void;
   votedStudentIds: Set<string>;
   electionActive: boolean;
-  admittedStudents: AdmittedStudent[];
+  admittedStudents: Student[];
 }
 
 export default function StudentPortal({
@@ -53,9 +53,9 @@ export default function StudentPortal({
       return;
     }
 
-    // Find in school admissions
+    // Find in school student database
     const registeredStudent = admittedStudents.find(
-      (s) => s.id.trim().toUpperCase() === trimmedId
+      (s) => s.admissionId.trim().toUpperCase() === trimmedId
     );
 
     if (!registeredStudent) {
@@ -64,19 +64,19 @@ export default function StudentPortal({
       return;
     }
 
-    // Verify PIN securely
-    const enteredPin = studentPin.trim();
-    const registeredPin = (registeredStudent.pin || '').trim();
+    // Verify Passcode securely
+    const enteredPasscode = studentPin.trim();
+    const registeredPasscode = (registeredStudent.passcode || '').trim();
 
-    if (registeredPin && enteredPin !== registeredPin) {
-      setWarningMessage("തെറ്റായ പിൻ നമ്പർ! ദയവായി ശരിയായ പിൻ നൽകുക. (Incorrect PIN! Please enter the correct security PIN.)");
+    if (enteredPasscode !== registeredPasscode) {
+      setWarningMessage("തെറ്റായ പാസ്‌കോഡ് നമ്പർ! ദയവായി ശരിയായ പാസ്‌കോഡ് നൽകുക. (Incorrect Passcode! Please enter the correct security passcode.)");
       playSystemSound('warning_sound');
       return;
     }
 
     // Check if duplicate vote
-    if (votedStudentIds.has(trimmedId)) {
-      setWarningMessage(`Student ID ${trimmedId} (${registeredStudent.name}) has already submitted a vote.`);
+    if (votedStudentIds.has(trimmedId) || registeredStudent.hasVoted) {
+      setWarningMessage(`ഈ വിദ്യാർത്ഥി ഇതിനകം വോട്ട് ചെയ്തിട്ടുണ്ട്! Student ID ${trimmedId} (${registeredStudent.studentName}) has already submitted a vote.`);
       playSystemSound('warning_sound');
       return;
     }
@@ -86,7 +86,8 @@ export default function StudentPortal({
     setWarningMessage(null);
     setSession({
       id: trimmedId,
-      name: registeredStudent.name,
+      name: registeredStudent.studentName,
+      grade: registeredStudent.grade,
       hasVoted: false,
     });
     
@@ -203,13 +204,13 @@ export default function StudentPortal({
             <div className="text-center">
               <InsightLogo layout="vertical" className="mb-4 scale-95" />
               <h2 className="text-xs font-bold text-slate-400 tracking-wider uppercase border-t border-slate-100 pt-4">Smart School Election System</h2>
-              <p className="text-[11px] text-slate-400 mt-1">Authenticate using your unique Student Admission ID and PIN</p>
+              <p className="text-[11px] text-slate-400 mt-1">Authenticate using your unique Student Admission ID and Passcode</p>
             </div>
 
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Student Admission ID
+                  Admission ID
                 </label>
                 <input
                   type="text"
@@ -227,13 +228,12 @@ export default function StudentPortal({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">
-                  Security PIN
+                  Passcode
                 </label>
                 <input
                   type="password"
                   required
-                  maxLength={6}
-                  placeholder="Enter PIN"
+                  placeholder="Enter Passcode"
                   value={studentPin}
                   onChange={(e) => {
                     setStudentPin(e.target.value);
@@ -242,32 +242,6 @@ export default function StudentPortal({
                   className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-sm font-mono tracking-wider transition-all"
                   id="student-pin-input"
                 />
-              </div>
-
-              {/* Admissions Helper Info */}
-              <div className="bg-indigo-50/50 border border-indigo-100/50 rounded-xl p-3.5 text-xs text-indigo-800">
-                <span className="font-bold block mb-1">ℹ️ Admission Database (Testing Helper):</span>
-                <p className="text-[11px] leading-relaxed">
-                  Click a student below to automatically fill their ID and private Security PIN:
-                </p>
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {admittedStudents.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setStudentId(s.id.trim().toUpperCase());
-                        setStudentPin((s.pin || '1234').trim());
-                        if (warningMessage) setWarningMessage(null);
-                      }}
-                      className="px-2.5 py-1 bg-white hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-md text-[11px] font-mono font-medium shadow-sm transition-all text-left cursor-pointer"
-                    >
-                      {s.id} ({s.name} - PIN: {s.pin || '1234'})
-                    </button>
-                  ))}
-                </div>
               </div>
 
               {warningMessage && (
@@ -320,10 +294,13 @@ export default function StudentPortal({
                 <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full uppercase tracking-wider">
                   Active Student Session
                 </span>
-                <h3 className="text-lg font-bold text-slate-800 mt-1 flex items-center gap-1.5">
+                <h3 className="text-lg font-bold text-slate-800 mt-1 flex items-center gap-1.5 flex-wrap">
                   Welcome, {session.name}
+                  <span className="text-xs font-mono font-normal text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
+                    {session.grade}
+                  </span>
                   <span className="text-xs font-mono font-normal text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
-                    ID: {session.id}
+                    Admission ID: {session.id}
                   </span>
                 </h3>
               </div>

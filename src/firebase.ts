@@ -4,7 +4,7 @@
  */
 
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, doc, getDocs, setDoc, updateDoc, deleteDoc, getDoc, onSnapshot, writeBatch } from 'firebase/firestore';
+import { getFirestore, collection, doc, getDocs, setDoc, updateDoc, deleteDoc, getDoc, onSnapshot, writeBatch, query, where } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
@@ -70,4 +70,4 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
-export { db, collection, doc, getDocs, setDoc, updateDoc, deleteDoc, getDoc, onSnapshot, writeBatch, storage };
+export { db, collection, doc, getDocs, setDoc, updateDoc, deleteDoc, getDoc, onSnapshot, writeBatch, storage, query, where };

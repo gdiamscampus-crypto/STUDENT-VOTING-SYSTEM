@@ -10,11 +10,8 @@ export interface Position {
 
 export const DEFAULT_POSITIONS: Position[] = [
   { id: 'pos-1', name: 'Head Boy' },
-  { id: 'pos-2', name: 'Assistant Head Boy' },
   { id: 'pos-3', name: 'Head Girl' },
-  { id: 'pos-4', name: 'Assistant Head Girl' },
-  { id: 'pos-5', name: 'Fine Arts Secretary (Boys)' },
-  { id: 'pos-6', name: 'Fine Arts Secretary (Girls)' },
+  { id: 'pos-5', name: 'Fine Arts Secretary' },
   { id: 'pos-7', name: 'Magazine Editor' },
 ];
 
@@ -78,11 +75,28 @@ export interface StudentSession {
   name: string;
   hasVoted: boolean;
   votedForId?: string;
+  grade?: string;
 }
 
-export interface AdmittedStudent {
-  id: string;
-  name: string;
-  pin: string;
+export interface Student {
+  studentId: string;
+  studentName: string;
+  admissionId: string;
+  grade: string;
+  passcode: string;
+  hasVoted: boolean;
+  votedAt: string | null;
 }
+
+export interface Admin {
+  adminId: string;
+  name: string;
+  username: string;
+  email: string;
+  password: string; // hashed password
+  role: string;
+  createdAt: string;
+  lastLogin: string | null;
+}
+
 

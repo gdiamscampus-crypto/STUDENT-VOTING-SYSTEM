@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Candidate, Vote, ElectionStatus, AudioSettings, AdmittedStudent, Position, DEFAULT_POSITIONS } from './types';
+import { Candidate, Vote, ElectionStatus, AudioSettings, Student, Position, DEFAULT_POSITIONS } from './types';
 import { getAudioSettings, updateAudioSettings } from './audio';
 import StudentPortal from './components/StudentPortal';
 import AdminPortal from './components/AdminPortal';
@@ -18,14 +18,15 @@ import AdminLogin from './components/AdminLogin';
 import AudioVisualizer from './components/AudioVisualizer';
 import InsightLogo from './components/InsightLogo';
 import { Vote as VoteIcon, ShieldCheck, HelpCircle, Activity, Award, CheckCircle } from 'lucide-react';
-import { db, collection, doc, onSnapshot, setDoc, updateDoc, getDoc, getDocs, writeBatch, deleteDoc, handleFirestoreError, OperationType } from './firebase';
+import { db, collection, doc, onSnapshot, setDoc, updateDoc, getDoc, getDocs, writeBatch, deleteDoc, handleFirestoreError, OperationType, query, where } from './firebase';
+import { hashPassword } from './utils/hash';
 
-const INITIAL_ADMITTED_STUDENTS: AdmittedStudent[] = [
-  { id: 'S101', name: 'Safa', pin: '1234' },
-  { id: 'S102', name: 'Sarang', pin: '2468' },
-  { id: 'S103', name: 'Meenakshi', pin: '1357' },
-  { id: 'S104', name: 'Aadhav', pin: '1111' },
-  { id: 'S105', name: 'Nandana', pin: '2222' },
+const INITIAL_STUDENTS: Student[] = [
+  { studentId: 'S101', studentName: 'Safa', admissionId: 'S101', grade: 'Grade 10', passcode: '1234', hasVoted: false, votedAt: null },
+  { studentId: 'S102', studentName: 'Sarang', admissionId: 'S102', grade: 'Grade 10', passcode: '2468', hasVoted: false, votedAt: null },
+  { studentId: 'S103', studentName: 'Meenakshi', admissionId: 'S103', grade: 'Grade 11', passcode: '1357', hasVoted: false, votedAt: null },
+  { studentId: 'S104', studentName: 'Aadhav', admissionId: 'S104', grade: 'Grade 9', passcode: '1111', hasVoted: false, votedAt: null },
+  { studentId: 'S105', studentName: 'Nandana', admissionId: 'S105', grade: 'Grade 12', passcode: '2222', hasVoted: false, votedAt: null },
 ];
 
 const INITIAL_CANDIDATES: Candidate[] = [
@@ -58,35 +59,6 @@ const INITIAL_CANDIDATES: Candidate[] = [
     colorTheme: 'rose',
     votesCount: 0,
   },
-  // pos-2: Assistant Head Boy
-  {
-    id: 'cand-2-1',
-    positionId: 'pos-2',
-    name: 'Roshan S',
-    grade: 'Grade 9',
-    division: 'A',
-    rollNumber: '23',
-    symbol: '🌟',
-    bio: 'Tech enthusiast, helper, and science club active member.',
-    manifesto: 'I promise to assist the Head Boy, help organize technical workshops, and implement smart classroom aids.',
-    avatarSeed: 'RS',
-    colorTheme: 'emerald',
-    votesCount: 0,
-  },
-  {
-    id: 'cand-2-2',
-    positionId: 'pos-2',
-    name: 'Devadhathan',
-    grade: 'Grade 9',
-    division: 'B',
-    rollNumber: '5',
-    symbol: '☀️',
-    bio: 'An approachable listener, passionate about discipline and clean campus.',
-    manifesto: 'I want to bridge the communication gap between junior classes and the high-school cabinet.',
-    avatarSeed: 'DD',
-    colorTheme: 'amber',
-    votesCount: 0,
-  },
   // pos-3: Head Girl
   {
     id: 'cand-3-1',
@@ -116,22 +88,7 @@ const INITIAL_CANDIDATES: Candidate[] = [
     colorTheme: 'teal',
     votesCount: 0,
   },
-  // pos-4: Assistant Head Girl
-  {
-    id: 'cand-4-1',
-    positionId: 'pos-4',
-    name: 'Gouri Priya',
-    grade: 'Grade 9',
-    division: 'B',
-    rollNumber: '8',
-    symbol: '🕊️',
-    bio: 'Classical singer, energetic volunteer, and class representative.',
-    manifesto: 'I will focus on empowering girls to lead debate tournaments, book clubs, and cultural festivals.',
-    avatarSeed: 'GP',
-    colorTheme: 'rose',
-    votesCount: 0,
-  },
-  // pos-5: Fine Arts Secretary (Boys)
+  // pos-5: Fine Arts Secretary
   {
     id: 'cand-5-1',
     positionId: 'pos-5',
@@ -146,10 +103,9 @@ const INITIAL_CANDIDATES: Candidate[] = [
     colorTheme: 'indigo',
     votesCount: 0,
   },
-  // pos-6: Fine Arts Secretary (Girls)
   {
-    id: 'cand-6-1',
-    positionId: 'pos-6',
+    id: 'cand-5-2',
+    positionId: 'pos-5',
     name: 'Nandana Nair',
     grade: 'Grade 10',
     division: 'B',
@@ -176,28 +132,102 @@ const INITIAL_CANDIDATES: Candidate[] = [
     colorTheme: 'emerald',
     votesCount: 0,
   },
+  {
+    id: 'cand-7-2',
+    positionId: 'pos-7',
+    name: 'Aadhav S',
+    grade: 'Grade 10',
+    division: 'A',
+    rollNumber: '5',
+    symbol: '🕊️',
+    bio: 'Passionate about creative design and school publications.',
+    manifesto: 'I promise to publish monthly newsletters and set up a student blog.',
+    avatarSeed: 'AS',
+    colorTheme: 'rose',
+    votesCount: 0,
+  }
 ];
 
 export default function App() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [votes, setVotes] = useState<Vote[]>([]);
-  const [admittedStudents, setAdmittedStudents] = useState<AdmittedStudent[]>([]);
+  const [admittedStudents, setAdmittedStudents] = useState<Student[]>([]);
   const [electionStatus, setElectionStatus] = useState<ElectionStatus>('active');
-  const [currentTab, setCurrentTab] = useState<'student' | 'admin'>('student');
   const [audioSettings, setAudioSettings] = useState<AudioSettings>(getAudioSettings());
-  
+
+  // URL routing state
+  const [currentPath, setCurrentPath] = useState<string>(() => window.location.pathname);
+
   // Admin Portal Password & Authentication states
-  const [adminPassword, setAdminPassword] = useState<string>('admin123');
+  const [adminPassword, setAdminPassword] = useState<string>('');
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() => {
-    return sessionStorage.getItem('isAdminAuthenticated') === 'true';
+    return localStorage.getItem('isAdminAuthenticated') === 'true' || 
+           sessionStorage.getItem('isAdminAuthenticated') === 'true';
   });
+
+  // Simple custom router link navigation
+  const navigate = (path: string) => {
+    window.history.pushState({}, '', path);
+    setCurrentPath(path);
+  };
+
+  // Popstate sync
+  useEffect(() => {
+    const handlePop = () => {
+      setCurrentPath(window.location.pathname);
+    };
+    window.addEventListener('popstate', handlePop);
+    return () => window.removeEventListener('popstate', handlePop);
+  }, []);
+
+  // Secure Inactivity timeout tracker (30 minutes)
+  useEffect(() => {
+    if (!isAdminAuthenticated) return;
+
+    const updateActivity = () => {
+      localStorage.setItem('admin_last_activity', Date.now().toString());
+    };
+
+    window.addEventListener('mousemove', updateActivity);
+    window.addEventListener('click', updateActivity);
+    window.addEventListener('keypress', updateActivity);
+    window.addEventListener('scroll', updateActivity);
+
+    updateActivity();
+
+    const interval = setInterval(() => {
+      const lastActivityStr = localStorage.getItem('admin_last_activity');
+      if (lastActivityStr) {
+        const lastActivity = parseInt(lastActivityStr, 10);
+        if (Date.now() - lastActivity > 30 * 60 * 1000) {
+          handleAdminLogout();
+          alert("Session expired due to 30 minutes of inactivity. Please log in again.");
+        }
+      }
+    }, 10000);
+
+    return () => {
+      window.removeEventListener('mousemove', updateActivity);
+      window.removeEventListener('click', updateActivity);
+      window.removeEventListener('keypress', updateActivity);
+      window.removeEventListener('scroll', updateActivity);
+      clearInterval(interval);
+    };
+  }, [isAdminAuthenticated]);
 
   // 0. Sync Positions in real-time & seed if empty
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'positions'), async (snapshot) => {
-      if (snapshot.empty) {
+      const currentList = snapshot.docs.map(d => d.data() as Position);
+      const expectedIds = DEFAULT_POSITIONS.map(p => p.id);
+      const matches = currentList.length === DEFAULT_POSITIONS.length && currentList.every(p => expectedIds.includes(p.id));
+
+      if (snapshot.empty || !matches) {
         const batch = writeBatch(db);
+        snapshot.docs.forEach((doc) => {
+          batch.delete(doc.ref);
+        });
         DEFAULT_POSITIONS.forEach((pos) => {
           batch.set(doc(db, 'positions', pos.id), pos);
         });
@@ -226,9 +256,16 @@ export default function App() {
   // 1. Sync Candidates in real-time & seed if empty
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'candidates'), async (snapshot) => {
-      if (snapshot.empty) {
+      const currentList = snapshot.docs.map(d => d.data() as Candidate);
+      const validPositionIds = ['pos-1', 'pos-3', 'pos-5', 'pos-7'];
+      const hasInvalidCandidate = currentList.some(c => !validPositionIds.includes(c.positionId));
+
+      if (snapshot.empty || hasInvalidCandidate) {
         // Seed default candidates
         const batch = writeBatch(db);
+        snapshot.docs.forEach((doc) => {
+          batch.delete(doc.ref);
+        });
         INITIAL_CANDIDATES.forEach((c) => {
           batch.set(doc(db, 'candidates', c.id), c);
         });
@@ -301,64 +338,52 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // 5. Sync Admitted Students in real-time & seed if empty
+  // 5. Sync Students in real-time & seed if empty
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'admitted_students'), async (snapshot) => {
+    const unsub = onSnapshot(collection(db, 'students'), async (snapshot) => {
       if (snapshot.empty) {
         const batch = writeBatch(db);
-        INITIAL_ADMITTED_STUDENTS.forEach((student) => {
-          batch.set(doc(db, 'admitted_students', student.id.trim().toUpperCase()), {
-            id: student.id.trim().toUpperCase(),
-            name: student.name.trim(),
-            pin: student.pin
-          });
+        INITIAL_STUDENTS.forEach((student) => {
+          batch.set(doc(db, 'students', student.studentId.trim().toUpperCase()), student);
         });
         await batch.commit();
       } else {
-        const list: AdmittedStudent[] = [];
-        const batch = writeBatch(db);
-        let needsMigration = false;
-        
+        const list: Student[] = [];
         snapshot.forEach((snapshotDoc) => {
-          const data = snapshotDoc.data() as AdmittedStudent;
-          if (!data.pin) {
-            const initial = INITIAL_ADMITTED_STUDENTS.find(
-              (s) => s.id.trim().toUpperCase() === data.id.trim().toUpperCase()
-            );
-            const resolvedPin = initial ? initial.pin : '1234';
-            data.pin = resolvedPin;
-            batch.update(snapshotDoc.ref, { pin: resolvedPin });
-            needsMigration = true;
-          }
-          list.push(data);
+          list.push(snapshotDoc.data() as Student);
         });
-
-        if (needsMigration) {
-          batch.commit().catch((err) => console.error("Admitted student PIN auto-migration failed:", err));
-        }
-
         setAdmittedStudents(list);
       }
     }, (error) => {
-      console.error("Firestore admitted students sync error:", error);
-      handleFirestoreError(error, OperationType.GET, 'admitted_students');
+      console.error("Firestore students sync error:", error);
+      handleFirestoreError(error, OperationType.GET, 'students');
     });
 
     return () => unsub();
   }, []);
 
-  // 6. Sync Admin Password in real-time
+  // 6. Sync Admin Credentials in real-time from the secure admins collection
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'settings', 'admin'), async (snapshot) => {
+    const unsub = onSnapshot(doc(db, 'admins', 'admin001'), async (snapshot) => {
       if (snapshot.exists()) {
-        setAdminPassword(snapshot.data().password || 'admin123');
+        setAdminPassword(snapshot.data().password);
       } else {
-        // Initialize with default 'admin123'
-        await setDoc(doc(db, 'settings', 'admin'), { password: 'admin123' });
+        // Initialize default administrator credentials with secure hash
+        const hashedDefault = await hashPassword('Admin@123');
+        await setDoc(doc(db, 'admins', 'admin001'), {
+          adminId: 'admin001',
+          name: 'School Administrator',
+          username: 'admin',
+          email: 'admin@school.com',
+          password: hashedDefault,
+          role: 'admin',
+          createdAt: new Date().toISOString(),
+          lastLogin: null
+        });
       }
     }, (error) => {
       console.error("Firestore admin settings sync error:", error);
-      handleFirestoreError(error, OperationType.GET, 'settings/admin');
+      handleFirestoreError(error, OperationType.GET, 'admins/admin001');
     });
 
     return () => unsub();
@@ -389,6 +414,17 @@ export default function App() {
           studentId: normalizedStudentId
         });
       });
+
+      // Atomically update student voting status in Firestore
+      if (newVotes.length > 0) {
+        const normalizedStudentId = newVotes[0].studentId.trim().toUpperCase();
+        const studentDocRef = doc(db, 'students', normalizedStudentId);
+        batch.update(studentDocRef, {
+          hasVoted: true,
+          votedAt: new Date().toISOString()
+        });
+      }
+
       await batch.commit();
     } catch (error) {
       console.error("Error submitting votes in batch to Firestore:", error);
@@ -431,21 +467,47 @@ export default function App() {
   // Reset all votes for testing
   const handleClearVotes = async () => {
     try {
-      const batch = writeBatch(db);
-
       // Delete all votes
       const votesQuery = await getDocs(collection(db, 'votes'));
-      votesQuery.forEach((d) => {
-        batch.delete(d.ref);
-      });
+      const voteRefs = votesQuery.docs.map(doc => doc.ref);
       
       // Reset candidates counts to 0 in firestore just in case
       const candidatesQuery = await getDocs(collection(db, 'candidates'));
-      candidatesQuery.forEach((d) => {
-        batch.update(d.ref, { votesCount: 0 });
+      const candidateRefs = candidatesQuery.docs.map(doc => doc.ref);
+
+      // Reset student voting status
+      const studentsQuery = await getDocs(collection(db, 'students'));
+      const studentRefs = studentsQuery.docs.map(doc => doc.ref);
+
+      // We will perform all operations using safe chunked batches
+      const operations: Array<{ type: 'delete' | 'update'; ref: any; data?: any }> = [];
+
+      voteRefs.forEach(ref => {
+        operations.push({ type: 'delete', ref });
       });
-      
-      await batch.commit();
+
+      candidateRefs.forEach(ref => {
+        operations.push({ type: 'update', ref, data: { votesCount: 0 } });
+      });
+
+      studentRefs.forEach(ref => {
+        operations.push({ type: 'update', ref, data: { hasVoted: false, votedAt: null } });
+      });
+
+      // Execute operations in chunks of 400 (well below 500 limit)
+      const chunkSize = 400;
+      for (let i = 0; i < operations.length; i += chunkSize) {
+        const chunk = operations.slice(i, i + chunkSize);
+        const batch = writeBatch(db);
+        chunk.forEach(op => {
+          if (op.type === 'delete') {
+            batch.delete(op.ref);
+          } else if (op.type === 'update') {
+            batch.update(op.ref, op.data);
+          }
+        });
+        await batch.commit();
+      }
     } catch (error) {
       console.error("Error clearing votes from Firestore:", error);
       handleFirestoreError(error, OperationType.DELETE, 'votes');
@@ -473,52 +535,96 @@ export default function App() {
   };
 
   // Add a student to admitted list
-  const handleAddAdmittedStudent = async (student: AdmittedStudent) => {
+  const handleAddAdmittedStudent = async (student: Student) => {
     try {
-      const normalizedId = student.id.trim().toUpperCase();
-      await setDoc(doc(db, 'admitted_students', normalizedId), {
-        id: normalizedId,
-        name: student.name.trim(),
-        pin: student.pin.trim()
+      const normalizedId = student.admissionId.trim().toUpperCase();
+      await setDoc(doc(db, 'students', normalizedId), {
+        studentId: normalizedId,
+        studentName: student.studentName.trim(),
+        admissionId: normalizedId,
+        grade: student.grade,
+        passcode: student.passcode,
+        hasVoted: student.hasVoted || false,
+        votedAt: student.votedAt || null
       });
     } catch (error) {
-      console.error("Error adding admitted student:", error);
-      handleFirestoreError(error, OperationType.WRITE, `admitted_students/${student.id}`);
+      console.error("Error adding student:", error);
+      handleFirestoreError(error, OperationType.WRITE, `students/${student.admissionId}`);
     }
   };
 
   // Delete a student from admitted list
-  const handleDeleteAdmittedStudent = async (studentId: string) => {
+  const handleDeleteAdmittedStudent = async (admissionId: string) => {
     try {
-      const normalizedId = studentId.trim().toUpperCase();
-      await deleteDoc(doc(db, 'admitted_students', normalizedId));
+      const normalizedId = admissionId.trim().toUpperCase();
+      await deleteDoc(doc(db, 'students', normalizedId));
     } catch (error) {
-      console.error("Error deleting admitted student:", error);
-      handleFirestoreError(error, OperationType.DELETE, `admitted_students/${studentId}`);
+      console.error("Error deleting student:", error);
+      handleFirestoreError(error, OperationType.DELETE, `students/${admissionId}`);
     }
   };
 
-  // Update administrative passcode
-  const handleUpdateAdminPassword = async (newPassword: string) => {
+  // Reset student votes and hasVoted state
+  const handleResetStudentVotes = async (admissionId: string) => {
     try {
-      await setDoc(doc(db, 'settings', 'admin'), { password: newPassword });
+      const batch = writeBatch(db);
+      const normalizedId = admissionId.trim().toUpperCase();
+      
+      // Update student document in Firestore
+      const studentDocRef = doc(db, 'students', normalizedId);
+      batch.update(studentDocRef, {
+        hasVoted: false,
+        votedAt: null
+      });
+
+      // Query and delete all votes associated with this student ID
+      const votesQuery = await getDocs(
+        query(collection(db, 'votes'), where('studentId', '==', normalizedId))
+      );
+      votesQuery.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+
+      await batch.commit();
     } catch (error) {
-      console.error("Error updating admin password:", error);
-      handleFirestoreError(error, OperationType.WRITE, 'settings/admin');
+      console.error("Error resetting student votes:", error);
+      handleFirestoreError(error, OperationType.WRITE, `students/${admissionId}/reset`);
     }
   };
 
   // Handle successful administrative login
-  const handleAdminLoginSuccess = () => {
+  const handleAdminLoginSuccess = (rememberMe: boolean) => {
     setIsAdminAuthenticated(true);
-    sessionStorage.setItem('isAdminAuthenticated', 'true');
+    if (rememberMe) {
+      localStorage.setItem('isAdminAuthenticated', 'true');
+    } else {
+      sessionStorage.setItem('isAdminAuthenticated', 'true');
+    }
+    navigate('/admin/dashboard');
   };
 
   // Handle administrative logout
   const handleAdminLogout = () => {
     setIsAdminAuthenticated(false);
+    localStorage.removeItem('isAdminAuthenticated');
     sessionStorage.removeItem('isAdminAuthenticated');
+    localStorage.removeItem('admin_last_activity');
+    navigate('/admin/login');
   };
+
+  // Determine view based on URL path routing
+  const isLoginPage = currentPath === '/admin/login';
+  const isDashboardPage = currentPath === '/admin/dashboard';
+  const isAdminRoute = isLoginPage || isDashboardPage;
+
+  // Perform secure path-based redirections
+  useEffect(() => {
+    if (isDashboardPage && !isAdminAuthenticated) {
+      navigate('/admin/login');
+    } else if (isLoginPage && isAdminAuthenticated) {
+      navigate('/admin/dashboard');
+    }
+  }, [currentPath, isAdminAuthenticated]);
 
   if (positions.length === 0 || candidates.length === 0) {
     return (
@@ -555,6 +661,18 @@ export default function App() {
     );
   }
 
+  // 1. ISOLATED ADMIN LOGIN VIEW (Path: /admin/login)
+  if (isLoginPage && !isAdminAuthenticated) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans" id="admin-login-route-container">
+        <AdminLogin
+          onLoginSuccess={handleAdminLoginSuccess}
+        />
+      </div>
+    );
+  }
+
+  // 2. MAIN APP ROUTE (Paths: /, /admin/dashboard)
   return (
     <div className="min-h-screen bg-slate-50/50 text-slate-800 font-sans flex flex-col justify-between" id="app-root-container">
       
@@ -582,9 +700,9 @@ export default function App() {
           {/* Navigation Tab Selectors */}
           <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200/50" id="portal-role-navigation">
             <button
-              onClick={() => setCurrentTab('student')}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-                currentTab === 'student'
+              onClick={() => navigate('/')}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                !isAdminRoute
                   ? 'bg-white text-indigo-700 shadow-sm'
                   : 'text-slate-500 hover:text-slate-800'
               }`}
@@ -594,9 +712,9 @@ export default function App() {
               Voting Booth
             </button>
             <button
-              onClick={() => setCurrentTab('admin')}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-                currentTab === 'admin'
+              onClick={() => navigate('/admin/dashboard')}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                isAdminRoute
                   ? 'bg-white text-indigo-700 shadow-sm'
                   : 'text-slate-500 hover:text-slate-800'
               }`}
@@ -613,7 +731,7 @@ export default function App() {
       {/* CORE CONTENT LAYOUT */}
       <main className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 flex-1 flex flex-col gap-8" id="main-app-content">
         
-        {/* Dynamic Waveform Audio Visualizer (Always displays state wave when sounds trigger!) */}
+        {/* Dynamic Waveform Audio Visualizer */}
         <div className="space-y-2" id="visualizer-wrapper">
           <div className="flex justify-between items-center text-xs">
             <span className="font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
@@ -630,7 +748,7 @@ export default function App() {
         {/* Portal Workspace Switcher */}
         <div className="flex-1" id="workspace-container">
           <AnimatePresence mode="wait">
-            {currentTab === 'student' ? (
+            {!isAdminRoute ? (
               <motion.div
                 key="student-view"
                 initial={{ opacity: 0, x: -10 }}
@@ -655,12 +773,7 @@ export default function App() {
                 exit={{ opacity: 0, x: -10 }}
                 transition={{ duration: 0.25 }}
               >
-                {!isAdminAuthenticated ? (
-                  <AdminLogin
-                    correctPasswordHash={adminPassword}
-                    onLoginSuccess={handleAdminLoginSuccess}
-                  />
-                ) : (
+                {isAdminAuthenticated && (
                   <AdminPortal
                     positions={positions}
                     candidates={candidatesWithVotes}
@@ -676,8 +789,8 @@ export default function App() {
                     admittedStudents={admittedStudents}
                     onAddAdmittedStudent={handleAddAdmittedStudent}
                     onDeleteAdmittedStudent={handleDeleteAdmittedStudent}
+                    onResetStudentVotes={handleResetStudentVotes}
                     adminPassword={adminPassword}
-                    onUpdateAdminPassword={handleUpdateAdminPassword}
                     onLogout={handleAdminLogout}
                   />
                 )}

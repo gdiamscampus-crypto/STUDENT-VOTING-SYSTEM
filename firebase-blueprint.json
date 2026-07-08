@@ -45,16 +45,20 @@
       },
       "required": ["id", "studentId", "studentName", "positionId", "candidateId", "timestamp"]
     },
-    "AdmittedStudent": {
-      "title": "AdmittedStudent",
-      "description": "A student officially admitted to the school with voting rights",
+    "Student": {
+      "title": "Student",
+      "description": "A student registered in the school database with voting status",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "pin": { "type": "string" }
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "admissionId": { "type": "string" },
+        "grade": { "type": "string" },
+        "passcode": { "type": "string" },
+        "hasVoted": { "type": "boolean" },
+        "votedAt": { "type": "string" }
       },
-      "required": ["id", "name", "pin"]
+      "required": ["studentId", "studentName", "admissionId", "grade", "passcode", "hasVoted"]
     },
     "ElectionSetting": {
       "title": "ElectionSetting",
@@ -74,9 +78,29 @@
         "volume": { "type": "number" }
       },
       "required": ["enabled", "volume"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Admin settings and configuration credentials",
+      "type": "object",
+      "properties": {
+        "adminId": { "type": "string" },
+        "name": { "type": "string" },
+        "username": { "type": "string" },
+        "email": { "type": "string" },
+        "password": { "type": "string" },
+        "role": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "lastLogin": { "type": "string" }
+      },
+      "required": ["adminId", "name", "username", "email", "password", "role", "createdAt"]
     }
   },
   "firestore": {
+    "admins/{adminId}": {
+      "schema": "Admin",
+      "description": "Administrative credential document"
+    },
     "positions/{positionId}": {
       "schema": "Position",
       "description": "The election positions/posts"
@@ -89,9 +113,9 @@
       "schema": "Vote",
       "description": "The votes collection"
     },
-    "admitted_students/{studentId}": {
-      "schema": "AdmittedStudent",
-      "description": "Official school admissions list"
+    "students/{studentId}": {
+      "schema": "Student",
+      "description": "Registered students database"
     },
     "settings/election": {
       "schema": "ElectionSetting",
