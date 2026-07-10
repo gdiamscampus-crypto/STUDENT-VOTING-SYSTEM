@@ -13,7 +13,8 @@ import {
   AudioSettings, 
   ElectionStatus, 
   Student, 
-  Position 
+  Position,
+  SelfieVerification
 } from '../types';
 import {
   playSystemSound,
@@ -29,9 +30,14 @@ import {
   setDoc,
   deleteDoc,
   writeBatch,
-  updateDoc
+  updateDoc,
+  collection,
+  onSnapshot,
+  handleFirestoreError,
+  OperationType
 } from '../firebase';
 import { hashPassword } from '../utils/hash';
+import ElectionSlips from './ElectionSlips';
 import {
   LayoutDashboard,
   Calendar,
@@ -67,7 +73,10 @@ import {
   User,
   CheckCircle,
   FileSpreadsheet,
-  ShieldCheck
+  ShieldCheck,
+  FileText,
+  Camera,
+  CameraOff
 } from 'lucide-react';
 
 const SOUND_LABELS: Record<SoundType, { label: string; desc: string }> = {
@@ -150,6 +159,52 @@ export default function AdminPortal({
   const [credentialsError, setCredentialsError] = useState<string | null>(null);
   const [isUpdatingCredentials, setIsUpdatingCredentials] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+
+  // Selfie Verification Logs States
+  const [selfies, setSelfies] = useState<SelfieVerification[]>([]);
+  const [selfieSearchQuery, setSelfieSearchQuery] = useState('');
+  const [isClearingSelfies, setIsClearingSelfies] = useState(false);
+
+  // Sync selfies dynamically in real-time
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'selfies'), (snapshot) => {
+      const list: SelfieVerification[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push(docSnap.data() as SelfieVerification);
+      });
+      // Sort newest logins first
+      list.sort((a, b) => new Date(b.loginTime).getTime() - new Date(a.loginTime).getTime());
+      setSelfies(list);
+    }, (error) => {
+      console.error("Firestore selfies sync error:", error);
+      handleFirestoreError(error, OperationType.GET, 'selfies');
+    });
+
+    return () => unsub();
+  }, []);
+
+  // Admin utility to clear selfie logs
+  const handleClearSelfieLogs = async () => {
+    if (!window.confirm("Are you sure you want to permanently delete all student camera verification selfie logs? This action is irreversible.")) {
+      return;
+    }
+    setIsClearingSelfies(true);
+    try {
+      const { getDocs } = await import('../firebase');
+      const querySnapshot = await getDocs(collection(db, 'selfies'));
+      const batch = writeBatch(db);
+      querySnapshot.docs.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+      await batch.commit();
+      playSystemSound('select_sound');
+    } catch (error) {
+      console.error("Error clearing selfies:", error);
+      handleFirestoreError(error, OperationType.DELETE, 'selfies/clear');
+    } finally {
+      setIsClearingSelfies(false);
+    }
+  };
 
   // Fetch admin credentials to pre-fill Change Password fields
   useEffect(() => {
@@ -633,6 +688,8 @@ export default function AdminPortal({
     { id: 'candidate_management', label: 'Candidate Management', icon: UserCheck },
     { id: 'student_management', label: 'Student Management', icon: GraduationCap },
     { id: 'import_students', label: 'Import Students (Excel/CSV)', icon: FileSpreadsheet },
+    { id: 'election_slips', label: 'Election Slips', icon: FileText },
+    { id: 'selfie_verification', label: 'Selfie Verification', icon: Camera },
     { id: 'voting_monitor', label: 'Voting Monitor', icon: Eye },
     { id: 'live_vote_count', label: 'Live Vote Count', icon: BarChart3 },
     { id: 'results', label: 'Results Summary', icon: Trophy },
@@ -1457,6 +1514,154 @@ export default function AdminPortal({
                   </p>
                 </div>
               </div>
+            </motion.div>
+          )}
+
+          {/* ==================== ELECTION SLIPS GENERATOR ==================== */}
+          {activeModule === 'election_slips' && (
+            <motion.div
+              key="election_slips"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-6"
+            >
+              <ElectionSlips 
+                students={admittedStudents} 
+                votes={votes}
+              />
+            </motion.div>
+          )}
+
+          {/* ==================== SELFIE VERIFICATION LOGS ==================== */}
+          {activeModule === 'selfie_verification' && (
+            <motion.div
+              key="selfie_verification"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="space-y-6"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50 p-5 rounded-2xl border border-slate-100">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 flex items-center gap-1.5">
+                    <Camera className="h-5 w-5 text-indigo-600" />
+                    Student Selfie Verification Logs
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    View captured student selfies securely. Live logins require fresh camera captures.
+                  </p>
+                </div>
+
+                {selfies.length > 0 && (
+                  <button
+                    onClick={handleClearSelfieLogs}
+                    disabled={isClearingSelfies}
+                    className="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-xl border border-rose-100 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-55"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Clear Selfie Logs
+                  </button>
+                )}
+              </div>
+
+              {/* SEARCH FILTERS */}
+              <div className="flex gap-3">
+                <input
+                  type="text"
+                  placeholder="Search by student name or Admission ID..."
+                  value={selfieSearchQuery}
+                  onChange={(e) => setSelfieSearchQuery(e.target.value)}
+                  className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                />
+                {selfieSearchQuery && (
+                  <button
+                    onClick={() => setSelfieSearchQuery('')}
+                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition-all"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+
+              {/* LOGS GRID */}
+              {(() => {
+                const filteredSelfies = selfies.filter((s) => {
+                  const query = selfieSearchQuery.trim().toLowerCase();
+                  return (
+                    s.studentName.toLowerCase().includes(query) ||
+                    s.admissionId.toLowerCase().includes(query)
+                  );
+                });
+
+                if (filteredSelfies.length === 0) {
+                  return (
+                    <div className="text-center py-12 bg-slate-50/50 rounded-2xl border border-dashed border-slate-100 space-y-3">
+                      <CameraOff className="h-10 w-10 text-slate-300 mx-auto" />
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-700">No Verifications Found</h4>
+                        <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
+                          {selfieSearchQuery ? "No matches found for your search query." : "No student selfie logins have been recorded yet in this election session."}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    {filteredSelfies.map((s) => {
+                      // Format date nicely
+                      const dateFormatted = new Date(s.loginTime).toLocaleString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                      });
+
+                      return (
+                        <div
+                          key={s.id}
+                          className="bg-white rounded-2xl border border-slate-100 overflow-hidden shadow-sm hover:shadow transition-all flex flex-col justify-between"
+                        >
+                          <div className="relative aspect-square w-full bg-slate-100 overflow-hidden">
+                            <img
+                              src={s.capturedSelfie}
+                              alt={`Selfie of ${s.studentName}`}
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover"
+                            />
+                            <div className="absolute bottom-2 left-2 bg-slate-900/80 text-white text-[9px] font-bold px-2 py-0.5 rounded-full backdrop-blur-sm">
+                              {s.admissionId}
+                            </div>
+                          </div>
+
+                          <div className="p-3.5 space-y-2">
+                            <div>
+                              <h4 className="text-xs font-bold text-slate-800 line-clamp-1">
+                                {s.studentName}
+                              </h4>
+                              <p className="text-[10px] text-slate-400 mt-0.5">
+                                Login Time: {dateFormatted}
+                              </p>
+                            </div>
+
+                            <div className="pt-2 border-t border-slate-100">
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">
+                                Device Info
+                              </span>
+                              <p className="text-[9px] text-slate-500 line-clamp-2 mt-0.5" title={s.deviceInfo}>
+                                {s.deviceInfo}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </motion.div>
           )}
 

@@ -99,4 +99,13 @@ export interface Admin {
   lastLogin: string | null;
 }
 
+export interface SelfieVerification {
+  id: string;
+  admissionId: string;
+  studentName: string;
+  loginTime: string;
+  capturedSelfie: string; // Base64 data URI
+  deviceInfo: string;
+}
+
 

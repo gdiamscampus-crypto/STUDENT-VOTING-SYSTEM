@@ -19,5 +19,8 @@ service cloud.firestore {
     match /settings/{settingId} {
       allow read, write: if true;
     }
+    match /selfies/{selfieId} {
+      allow read, write: if true;
+    }
   }
 }

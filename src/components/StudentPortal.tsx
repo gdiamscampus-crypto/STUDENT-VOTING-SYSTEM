@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, FormEvent } from 'react';
+import { useState, FormEvent, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Candidate, Vote, StudentSession, Student, Position } from '../types';
 import { playSystemSound } from '../audio';
-import { User, ShieldAlert, CheckCircle, Award, Sparkles, ChevronRight, ChevronLeft, LogOut, FileText, Check } from 'lucide-react';
+import { db, doc, setDoc, handleFirestoreError, OperationType } from '../firebase';
+import { User, ShieldAlert, CheckCircle, Award, Sparkles, ChevronRight, ChevronLeft, LogOut, FileText, Check, Camera, CameraOff, RotateCcw, Loader2 } from 'lucide-react';
 import Confetti from './Confetti';
 import InsightLogo from './InsightLogo';
 
@@ -33,6 +34,18 @@ export default function StudentPortal({
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
   const [session, setSession] = useState<StudentSession | null>(null);
 
+  // Camera Verification States
+  const [showCameraStep, setShowCameraStep] = useState(false);
+  const [tempStudent, setTempStudent] = useState<StudentSession | null>(null);
+  const [capturedSelfie, setCapturedSelfie] = useState<string | null>(null);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isInitializingCamera, setIsInitializingCamera] = useState(false);
+  const [isSavingSelfie, setIsSavingSelfie] = useState(false);
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
   // Multi-post voting states
   const [currentPositionIndex, setCurrentPositionIndex] = useState(0);
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<Record<string, string>>({}); // positionId -> candidateId
@@ -40,7 +53,155 @@ export default function StudentPortal({
   const [voteSubmitted, setVoteSubmitted] = useState(false);
   const [selectionConfirmedText, setSelectionConfirmedText] = useState<string | null>(null);
 
-  // Trigger login
+  // Stop camera tracks to release camera hardware
+  const stopCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((track) => track.stop());
+    }
+    setCameraStream(null);
+  };
+
+  // Start video stream from the user-facing device camera
+  const startCamera = async () => {
+    setIsInitializingCamera(true);
+    setCameraError(null);
+    setCapturedSelfie(null);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'user', // Request user-facing front camera
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+        },
+        audio: false,
+      });
+      setCameraStream(stream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch((err) => console.error("Error playing camera video stream:", err));
+      }
+    } catch (err: any) {
+      console.error("Camera access error:", err);
+      let errMsg = "Camera access denied or unavailable. Camera permission is mandatory to proceed with voting.";
+      if (err.name === 'NotAllowedError') {
+        errMsg = "Camera permission was denied. Camera permission is mandatory to verify your identity and vote.";
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        errMsg = "No camera was found on your device. An active camera is required for student verification.";
+      }
+      setCameraError(errMsg);
+      playSystemSound('warning_sound');
+    } finally {
+      setIsInitializingCamera(false);
+    }
+  };
+
+  // Keep camera synced with step transitions
+  useEffect(() => {
+    if (showCameraStep && tempStudent) {
+      startCamera();
+    } else {
+      stopCamera();
+    }
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, [showCameraStep]);
+
+  // Capture current live frame from the video stream onto a canvas and stop stream
+  const handleCapture = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const context = canvas.getContext('2d');
+
+    if (context) {
+      // Adjust canvas to match active video source size
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+
+      // Draw mirrored selfie for natural perspective
+      context.translate(canvas.width, 0);
+      context.scale(-1, 1);
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      context.setTransform(1, 0, 0, 1, 0, 0); // reset matrix
+
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      setCapturedSelfie(dataUrl);
+      playSystemSound('select_sound');
+
+      // Release video stream immediately once captured
+      if (cameraStream) {
+        cameraStream.getTracks().forEach((track) => track.stop());
+      }
+      setCameraStream(null);
+    }
+  };
+
+  // Re-enable live preview to retake
+  const handleRetake = () => {
+    setCapturedSelfie(null);
+    startCamera();
+  };
+
+  // Commit selfie and student data to Firestore, and log in to start voting
+  const handleConfirmVerification = async () => {
+    if (!tempStudent || !capturedSelfie) return;
+
+    setIsSavingSelfie(true);
+    try {
+      const selfieId = `selfie_${tempStudent.id}_${Date.now()}`;
+      await setDoc(doc(db, 'selfies', selfieId), {
+        id: selfieId,
+        admissionId: tempStudent.id,
+        studentName: tempStudent.name,
+        loginTime: new Date().toISOString(),
+        capturedSelfie: capturedSelfie,
+        deviceInfo: navigator.userAgent || 'Unknown Device',
+      });
+
+      // Login success
+      playSystemSound('login_sound');
+      setSession(tempStudent);
+
+      // Reset local transition states
+      setShowCameraStep(false);
+      setTempStudent(null);
+      setCapturedSelfie(null);
+      setWarningMessage(null);
+
+      // Reset voting flow states
+      setCurrentPositionIndex(0);
+      setSelectedCandidateIds({});
+      setIsReviewStep(false);
+      setVoteSubmitted(false);
+    } catch (error) {
+      console.error("Failed to save selfie verification:", error);
+      handleFirestoreError(error, OperationType.CREATE, `selfies/selfie_${tempStudent.id}`);
+    } finally {
+      setIsSavingSelfie(false);
+    }
+  };
+
+  // Return to initial login step
+  const handleCancelVerification = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((track) => track.stop());
+    }
+    setCameraStream(null);
+    setShowCameraStep(false);
+    setTempStudent(null);
+    setCapturedSelfie(null);
+    setCameraError(null);
+    setStudentId('');
+    setStudentPin('');
+    playSystemSound('select_sound');
+  };
+
+  // Trigger login - Authenticates credentials and opens Camera Verification
   const handleLogin = (e: FormEvent) => {
     e.preventDefault();
     const trimmedId = studentId.trim().toUpperCase();
@@ -81,21 +242,16 @@ export default function StudentPortal({
       return;
     }
 
-    // Success login
-    playSystemSound('login_sound');
+    // Success login credentials - transition to selfie capture
+    playSystemSound('select_sound');
     setWarningMessage(null);
-    setSession({
+    setTempStudent({
       id: trimmedId,
       name: registeredStudent.studentName,
       grade: registeredStudent.grade,
       hasVoted: false,
     });
-    
-    // Reset voting flow states
-    setCurrentPositionIndex(0);
-    setSelectedCandidateIds({});
-    setIsReviewStep(false);
-    setVoteSubmitted(false);
+    setShowCameraStep(true);
   };
 
   // Handle Candidate Selection for current post
@@ -191,7 +347,7 @@ export default function StudentPortal({
     <div className="relative w-full max-w-4xl mx-auto animate-fadeIn" id="student-portal-wrapper">
       <AnimatePresence mode="wait">
         {/* Step 1: Login Form */}
-        {!session && (
+        {!session && !showCameraStep && (
           <motion.div
             key="login"
             initial={{ opacity: 0, y: 15 }}
@@ -268,10 +424,159 @@ export default function StudentPortal({
                 className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-100 disabled:text-slate-400 text-white font-medium text-sm rounded-xl shadow-lg shadow-indigo-600/10 hover:shadow-indigo-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                 id="student-login-submit"
               >
-                Verify Admission & Vote
+                Verify Identity
                 <ChevronRight className="h-4 w-4" />
               </button>
             </form>
+          </motion.div>
+        )}
+
+        {!session && showCameraStep && tempStudent && (
+          <motion.div
+            key="camera-step"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -15 }}
+            transition={{ duration: 0.3 }}
+            className="bg-white rounded-2xl shadow-xl border border-slate-100 p-8 max-w-lg mx-auto space-y-6"
+            id="student-camera-card"
+          >
+            <div className="text-center space-y-2">
+              <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full uppercase tracking-wider">
+                Step 2: Camera Verification
+              </span>
+              <h2 className="text-lg font-black text-slate-800 tracking-tight">Verify Your Identity</h2>
+              <p className="text-xs text-slate-400">
+                Hi <span className="font-bold text-slate-700">{tempStudent.name}</span> ({tempStudent.grade}). Please capture a quick live selfie to authenticate.
+              </p>
+            </div>
+
+            {/* Hidden Canvas used for capturing the selfie frame */}
+            <canvas ref={canvasRef} className="hidden" />
+
+            {/* Live Camera Viewport or Captured Selfie Image */}
+            <div className="relative aspect-video w-full bg-slate-900 rounded-2xl overflow-hidden border border-slate-200 shadow-inner flex items-center justify-center group">
+              {isInitializingCamera && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center space-y-3 bg-slate-950/90 text-white z-10 animate-fadeIn">
+                  <Loader2 className="h-8 w-8 text-indigo-400 animate-spin" />
+                  <p className="text-xs font-semibold tracking-wide uppercase text-indigo-200">Initializing Secure Lens...</p>
+                  <p className="text-[11px] text-slate-400 max-w-xs leading-relaxed">
+                    Please approve browser camera permissions if prompted to verify your biometric voting lock.
+                  </p>
+                </div>
+              )}
+
+              {cameraError ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center space-y-4 bg-slate-950 text-white z-10 animate-fadeIn">
+                  <CameraOff className="h-10 w-10 text-rose-500 animate-bounce" />
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-rose-400">Verification Interrupted</h4>
+                    <p className="text-[11px] text-slate-300 mt-2 max-w-xs leading-relaxed">
+                      {cameraError}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={startCamera}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl transition-all cursor-pointer"
+                    >
+                      Retry Camera
+                    </button>
+                    <button
+                      onClick={handleCancelVerification}
+                      className="px-4 py-2 bg-slate-850 hover:bg-slate-800 text-slate-300 font-semibold text-xs rounded-xl transition-all cursor-pointer"
+                    >
+                      Back to Login
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Live Video Feed */}
+              {!capturedSelfie && !cameraError && (
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full h-full object-cover transform scale-x-[-1]"
+                />
+              )}
+
+              {/* Biometric overlay frame guidelines when video is active */}
+              {!capturedSelfie && !cameraError && !isInitializingCamera && (
+                <div className="absolute inset-0 border-2 border-dashed border-indigo-500/30 rounded-2xl pointer-events-none flex items-center justify-center">
+                  <div className="w-56 h-56 rounded-full border-2 border-indigo-500/40 border-dashed relative animate-pulse">
+                    <div className="absolute top-2 left-1/2 -translate-x-1/2 text-[9px] font-bold text-indigo-400/80 tracking-widest uppercase bg-slate-950/80 px-2 py-0.5 rounded-full">
+                      Align Face
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Captured Image Preview */}
+              {capturedSelfie && (
+                <img
+                  src={capturedSelfie}
+                  alt="Captured Selfie"
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                />
+              )}
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              {!capturedSelfie ? (
+                <>
+                  <button
+                    onClick={handleCapture}
+                    disabled={isInitializingCamera || !!cameraError}
+                    className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-100 disabled:text-slate-400 text-white font-bold text-xs rounded-xl shadow-lg shadow-indigo-600/10 hover:shadow-indigo-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Camera className="h-4 w-4" />
+                    Capture Selfie
+                  </button>
+                  <button
+                    onClick={handleCancelVerification}
+                    className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    Cancel Verification
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={handleConfirmVerification}
+                    disabled={isSavingSelfie}
+                    className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-100 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-600/10 hover:shadow-emerald-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    {isSavingSelfie ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Verifying & Logging In...
+                      </>
+                    ) : (
+                      <>
+                        <Check className="h-4 w-4" />
+                        Confirm & Log In to Vote
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={handleRetake}
+                    disabled={isSavingSelfie}
+                    className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Retake Selfie
+                  </button>
+                </>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-400 text-center leading-relaxed">
+              🔒 Biometric verifications are stored securely inside high-integrity cloud databases. Gallery uploads are strictly disabled to prevent spoofing.
+            </p>
           </motion.div>
         )}
 

@@ -94,6 +94,20 @@
         "lastLogin": { "type": "string" }
       },
       "required": ["adminId", "name", "username", "email", "password", "role", "createdAt"]
+    },
+    "SelfieVerification": {
+      "title": "SelfieVerification",
+      "description": "Biometric selfie verification logged during student login",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "admissionId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "loginTime": { "type": "string" },
+        "capturedSelfie": { "type": "string" },
+        "deviceInfo": { "type": "string" }
+      },
+      "required": ["id", "admissionId", "studentName", "loginTime", "capturedSelfie", "deviceInfo"]
     }
   },
   "firestore": {
@@ -124,6 +138,10 @@
     "settings/audio": {
       "schema": "AudioSetting",
       "description": "Audio config setting doc"
+    },
+    "selfies/{selfieId}": {
+      "schema": "SelfieVerification",
+      "description": "The student login biometric selfie verification logs"
     }
   }
 }
