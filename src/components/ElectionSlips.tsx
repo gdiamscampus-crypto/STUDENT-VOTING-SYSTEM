@@ -3,28 +3,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { jsPDF } from 'jspdf';
 import { Student, Vote } from '../types';
 import { 
   Printer, 
-  Download, 
   Search, 
-  QrCode, 
-  Check, 
-  Loader2, 
-  SlidersHorizontal,
+  CheckSquare, 
+  Square, 
+  ChevronLeft, 
+  ChevronRight, 
   FileText,
-  Settings2,
-  CheckSquare,
-  Square,
-  GraduationCap,
-  ShieldCheck,
-  AlertCircle,
+  Filter,
+  Check,
+  X,
+  Download,
   Eye,
-  Sparkles,
-  Award,
-  Signature
+  EyeOff,
+  LayoutGrid,
+  List,
+  Info,
+  HelpCircle
 } from 'lucide-react';
 import { playSystemSound } from '../audio';
 
@@ -33,708 +32,1172 @@ interface ElectionSlipsProps {
   votes: Vote[];
 }
 
+interface SingleElectionSlipProps {
+  student: Student;
+  onPrint?: () => void;
+  onDownloadPDF?: () => void;
+  isSelected?: boolean;
+  onSelectToggle?: () => void;
+  key?: React.Key;
+}
+
+/**
+ * Normalizes grade and division strings consistently
+ */
+function useNormalizedGrade(gradeString: string) {
+  return useMemo(() => {
+    const rawGrade = gradeString || '';
+    if (rawGrade.includes('-')) {
+      const parts = rawGrade.split('-');
+      return {
+        gradeText: parts[0].trim(),
+        divisionText: parts[1].trim(),
+      };
+    }
+    const match = rawGrade.match(/^(Grade\s+\d+|\d+)\s+([A-D])$/i);
+    if (match) {
+      return {
+        gradeText: match[1].trim(),
+        divisionText: match[2].trim(),
+      };
+    }
+    return {
+      gradeText: rawGrade,
+      divisionText: 'A',
+    };
+  }, [gradeString]);
+}
+
+/**
+ * Renders a clean, beautifully designed simple white card with a blue header
+ * for on-screen visualization. Designed exactly according to administrative specs.
+ */
+function SingleElectionSlip({ student, onPrint, onDownloadPDF, isSelected, onSelectToggle }: SingleElectionSlipProps) {
+  const { gradeText, divisionText } = useNormalizedGrade(student.grade);
+
+  return (
+    <div className="relative bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden text-slate-800 flex flex-col justify-between max-w-md mx-auto w-full group transition-all duration-300 hover:shadow-lg hover:border-blue-200">
+      {/* Selection Checkbox (Top Left) */}
+      {onSelectToggle && (
+         <button
+           onClick={(e) => {
+             e.stopPropagation();
+             onSelectToggle();
+           }}
+           className="absolute top-3.5 left-3.5 z-10 p-1 bg-white/95 backdrop-blur-sm rounded-lg shadow-sm border border-slate-200 text-slate-600 hover:text-blue-600 hover:border-blue-300 transition-all active:scale-95 cursor-pointer"
+           title={isSelected ? "Deselect" : "Select for bulk action"}
+         >
+           {isSelected ? (
+             <CheckSquare className="h-5 w-5 text-blue-600" />
+           ) : (
+             <Square className="h-5 w-5 text-slate-400" />
+           )}
+         </button>
+      )}
+
+      {/* Quick Action Buttons (Top Right) */}
+      <div className="absolute top-3.5 right-3.5 z-10 flex gap-1.5">
+        {onPrint && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onPrint();
+            }}
+            className="p-1.5 bg-white/95 backdrop-blur-sm rounded-lg shadow-sm border border-slate-200 text-slate-600 hover:text-blue-600 hover:border-blue-300 transition-all active:scale-95 hover:scale-105 cursor-pointer"
+            title="Print slip"
+          >
+            <Printer className="h-4 w-4" />
+          </button>
+        )}
+        {onDownloadPDF && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDownloadPDF();
+            }}
+            className="p-1.5 bg-white/95 backdrop-blur-sm rounded-lg shadow-sm border border-slate-200 text-slate-600 hover:text-blue-600 hover:border-blue-300 transition-all active:scale-95 hover:scale-105 cursor-pointer"
+            title="Download PDF"
+          >
+            <Download className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
+      {/* Slip Header: Solid Blue */}
+      <div className="bg-blue-600 text-white p-5 text-center">
+        {/* Mock Simple Logo Crest */}
+        <div className="mx-auto h-7 w-7 bg-white/10 rounded-full flex items-center justify-center mb-1.5 border border-white/20">
+          <FileText className="h-4 w-4 text-white" />
+        </div>
+        <h3 className="text-xs font-black tracking-wider uppercase">Smart School Election System</h3>
+        <p className="text-[10px] font-bold tracking-widest text-blue-100 mt-0.5 uppercase">Election Login Slip</p>
+      </div>
+
+      {/* Dash line separator resembling thermal paper slips */}
+      <div className="border-t border-dashed border-slate-200 w-full" />
+
+      {/* Slip Information Fields */}
+      <div className="p-5 space-y-4">
+        {/* Core Student metadata */}
+        <div className="space-y-2 text-xs leading-relaxed text-slate-600">
+          <div className="flex justify-between items-center py-0.5 border-b border-slate-50">
+            <span className="font-bold text-slate-400 uppercase tracking-wider text-[9px]">Student Name</span>
+            <span className="font-bold text-slate-950 text-sm truncate max-w-[200px]">{student.studentName}</span>
+          </div>
+          <div className="flex justify-between items-center py-0.5 border-b border-slate-50">
+            <span className="font-bold text-slate-400 uppercase tracking-wider text-[9px]">Admission ID</span>
+            <span className="font-semibold text-slate-800 text-sm">{student.admissionId}</span>
+          </div>
+          <div className="flex justify-between items-center py-0.5 border-b border-slate-50">
+            <span className="font-bold text-slate-400 uppercase tracking-wider text-[9px]">Grade</span>
+            <span className="font-semibold text-slate-800 text-sm">{gradeText}</span>
+          </div>
+          <div className="flex justify-between items-center py-0.5 border-b border-slate-50">
+            <span className="font-bold text-slate-400 uppercase tracking-wider text-[9px]">Division</span>
+            <span className="font-semibold text-slate-800 text-sm">{divisionText}</span>
+          </div>
+          <div className="flex justify-between items-center py-0.5">
+            <span className="font-bold text-slate-400 uppercase tracking-wider text-[9px]">Election Year</span>
+            <span className="font-semibold text-slate-800 text-sm">2026</span>
+          </div>
+        </div>
+
+        {/* Credentials separator line */}
+        <div className="relative py-1 flex items-center justify-center">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-dashed border-slate-200"></div>
+          </div>
+          <span className="relative px-3 bg-white text-[9px] font-black uppercase tracking-widest text-slate-400">LOGIN CREDENTIALS</span>
+        </div>
+
+        {/* Credentials details box */}
+        <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-100 space-y-2.5">
+          <div className="flex justify-between items-center text-xs">
+            <span className="font-bold text-slate-500 uppercase tracking-wider text-[9px]">Admission ID:</span>
+            <span className="font-mono font-bold text-slate-900 bg-white px-2.5 py-1 rounded-md border border-slate-200 shadow-sm">{student.admissionId}</span>
+          </div>
+          <div className="flex justify-between items-center text-xs">
+            <span className="font-bold text-slate-500 uppercase tracking-wider text-[9px]">Passcode:</span>
+            <span className="font-mono font-black text-blue-600 bg-white px-2.5 py-1 rounded-md border border-blue-200 shadow-sm tracking-wider">{student.passcode}</span>
+          </div>
+        </div>
+
+        {/* Instructions separator line */}
+        <div className="relative py-1 flex items-center justify-center">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-dashed border-slate-200"></div>
+          </div>
+          <span className="relative px-3 bg-white text-[9px] font-black uppercase tracking-widest text-slate-400">IMPORTANT</span>
+        </div>
+
+        {/* Important notices */}
+        <ul className="text-[11px] text-slate-500 space-y-1.5 bg-blue-50/20 p-4 rounded-xl border border-blue-100/30">
+          <li className="flex items-start gap-1.5 leading-relaxed">
+            <span className="text-blue-500 font-bold text-xs shrink-0 mt-[-2px]">•</span>
+            <span>Keep this Election Slip confidential.</span>
+          </li>
+          <li className="flex items-start gap-1.5 leading-relaxed">
+            <span className="text-blue-500 font-bold text-xs shrink-0 mt-[-2px]">•</span>
+            <span>Do not share your Admission ID or Passcode.</span>
+          </li>
+          <li className="flex items-start gap-1.5 leading-relaxed">
+            <span className="text-blue-500 font-bold text-xs shrink-0 mt-[-2px]">•</span>
+            <span>One student can vote only once.</span>
+          </li>
+          <li className="flex items-start gap-1.5 leading-relaxed">
+            <span className="text-blue-500 font-bold text-xs shrink-0 mt-[-2px]">•</span>
+            <span>Contact the Election Administrator if you need assistance.</span>
+          </li>
+        </ul>
+      </div>
+
+      {/* Slip Footer Divider */}
+      <div className="border-t border-dashed border-slate-200 w-full" />
+    </div>
+  );
+}
+
+/**
+ * High-contrast layout component optimized for standard browser printing.
+ * Keeps shadows out, and uses strict browser styles.
+ */
+interface PrintSlipProps {
+  student: Student;
+  key?: React.Key;
+}
+
+function PrintSlip({ student }: PrintSlipProps) {
+  const { gradeText, divisionText } = useNormalizedGrade(student.grade);
+
+  return (
+    <div className="print-slip-card break-inside-avoid">
+      <div className="print-blue-header">
+        <div className="text-sm font-extrabold tracking-wider">SMART SCHOOL ELECTION SYSTEM</div>
+        <div className="text-[10px] font-semibold tracking-widest mt-0.5 opacity-90">ELECTION LOGIN SLIP</div>
+      </div>
+
+      <div className="my-3 border-t border-dashed border-slate-400" />
+
+      {/* Info fields */}
+      <div className="space-y-1.5 text-xs text-slate-800">
+        <div className="flex justify-between py-0.5 border-b border-slate-100">
+          <span className="font-bold text-slate-500">Student Name:</span>
+          <span className="font-bold text-slate-900">{student.studentName}</span>
+        </div>
+        <div className="flex justify-between py-0.5 border-b border-slate-100">
+          <span className="font-bold text-slate-500">Admission ID:</span>
+          <span className="font-medium text-slate-800">{student.admissionId}</span>
+        </div>
+        <div className="flex justify-between py-0.5 border-b border-slate-100">
+          <span className="font-bold text-slate-500">Grade:</span>
+          <span className="font-medium text-slate-800">{gradeText}</span>
+        </div>
+        <div className="flex justify-between py-0.5 border-b border-slate-100">
+          <span className="font-bold text-slate-500">Division:</span>
+          <span className="font-medium text-slate-800">{divisionText}</span>
+        </div>
+        <div className="flex justify-between py-0.5">
+          <span className="font-bold text-slate-500">Election Year:</span>
+          <span className="font-medium text-slate-800">2026</span>
+        </div>
+      </div>
+
+      <div className="my-3 border-t border-dashed border-slate-400" />
+
+      {/* Credentials */}
+      <div className="text-center font-bold text-[9px] text-slate-400 tracking-widest mb-1.5 uppercase">LOGIN CREDENTIALS</div>
+      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1.5 text-xs">
+        <div className="flex justify-between">
+          <span className="font-bold text-slate-500">Admission ID:</span>
+          <span className="font-mono font-bold text-slate-950">{student.admissionId}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="font-bold text-slate-500">Passcode:</span>
+          <span className="font-mono font-extrabold text-blue-700">{student.passcode}</span>
+        </div>
+      </div>
+
+      <div className="my-3 border-t border-dashed border-slate-400" />
+
+      {/* Rules Notice */}
+      <div className="text-xs text-slate-700">
+        <div className="font-bold text-[9px] text-slate-400 tracking-widest uppercase mb-1">IMPORTANT</div>
+        <ul className="list-disc pl-4 space-y-1 text-slate-600">
+          <li>Keep this Election Slip confidential.</li>
+          <li>Do not share your Admission ID or Passcode.</li>
+          <li>One student can vote only once.</li>
+          <li>Contact the Election Administrator if you need assistance.</li>
+        </ul>
+      </div>
+
+      <div className="mt-3 border-t border-dashed border-slate-400" />
+    </div>
+  );
+}
+
+/**
+ * Reusable helper function to draw a clean vector-based election slip on a jsPDF document
+ */
+function drawVectorSlipToPDF(doc: jsPDF, student: Student, x: number, y: number) {
+  const cardWidth = 90;
+  const cardHeight = 125;
+  const headerHeight = 18;
+
+  // Extract Normalized Grade and Division
+  const rawGrade = student.grade || '';
+  let gradeText = rawGrade;
+  let divisionText = 'A';
+  if (rawGrade.includes('-')) {
+    const parts = rawGrade.split('-');
+    gradeText = parts[0].trim();
+    divisionText = parts[1].trim();
+  } else {
+    const match = rawGrade.match(/^(Grade\s+\d+|\d+)\s+([A-D])$/i);
+    if (match) {
+      gradeText = match[1].trim();
+      divisionText = match[2].trim();
+    }
+  }
+
+  // 1. Draw dashed border bounding box around the card
+  doc.setLineWidth(0.3);
+  doc.setDrawColor(148, 163, 184); // Slate-400
+  doc.setLineDashPattern([2, 2], 0);
+  doc.rect(x, y, cardWidth, cardHeight, 'S');
+
+  // Disable line dash pattern for fills and lines
+  doc.setLineDashPattern([], 0);
+
+  // 2. Solid Blue Header Rectangle
+  doc.setFillColor(37, 99, 235); // Blue-600
+  doc.rect(x + 0.1, y + 0.1, cardWidth - 0.2, headerHeight, 'F');
+
+  // 3. Header White Shield Logo Icon
+  doc.setDrawColor(255, 255, 255);
+  doc.setFillColor(255, 255, 255);
+  doc.circle(x + 8, y + headerHeight / 2, 3.2, 'FD');
+
+  doc.setFillColor(37, 99, 235); // Blue
+  // Tiny vector graduation cap or shield inside
+  doc.triangle(
+    x + 8, y + headerHeight / 2 - 1.8,
+    x + 6, y + headerHeight / 2 + 0.8,
+    x + 10, y + headerHeight / 2 + 0.8,
+    'F'
+  );
+
+  // 4. Header text (white)
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.text('SMART SCHOOL ELECTION SYSTEM', x + 14, y + 7.5);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.text('ELECTION LOGIN SLIP', x + 14, y + 11.5);
+
+  // 5. Light dashed divider line right below header
+  doc.setDrawColor(226, 232, 240); // Slate-200
+  doc.setLineWidth(0.2);
+  doc.setLineDashPattern([1.5, 1.5], 0);
+  doc.line(x, y + headerHeight + 2.5, x + cardWidth, y + headerHeight + 2.5);
+
+  // Reset to solid line format
+  doc.setLineDashPattern([], 0);
+
+  // 6. Student Information fields
+  let currentY = y + headerHeight + 8;
+  const labelX = x + 6;
+  const valueX = x + cardWidth - 6;
+
+  const infoFields = [
+    { label: 'STUDENT NAME', value: student.studentName, isBold: true },
+    { label: 'ADMISSION ID', value: student.admissionId, isBold: false },
+    { label: 'GRADE', value: gradeText, isBold: false },
+    { label: 'DIVISION', value: divisionText, isBold: false },
+    { label: 'ELECTION YEAR', value: '2026', isBold: false }
+  ];
+
+  infoFields.forEach((f) => {
+    // Label text (slate-400/500)
+    doc.setTextColor(100, 116, 139);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6);
+    doc.text(f.label, labelX, currentY);
+
+    // Value text (slate-900)
+    doc.setTextColor(15, 23, 42);
+    doc.setFont('helvetica', f.isBold ? 'bold' : 'normal');
+    doc.setFontSize(7.5);
+    const valWidth = doc.getTextWidth(f.value);
+    doc.text(f.value, valueX - valWidth, currentY);
+
+    // Separator line
+    doc.setDrawColor(241, 245, 249); // slate-100
+    doc.line(labelX, currentY + 2, valueX, currentY + 2);
+
+    currentY += 6.5;
+  });
+
+  // 7. Credentials separator heading
+  currentY += 1.5;
+  doc.setDrawColor(226, 232, 240); // Slate-200
+  doc.setLineDashPattern([1.5, 1.5], 0);
+  doc.line(x + 10, currentY, x + cardWidth - 10, currentY);
+
+  doc.setLineDashPattern([], 0);
+  const credsHeadingText = 'LOGIN CREDENTIALS';
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(5.5);
+  doc.setTextColor(148, 163, 184); // slate-400
+  const headingWidth = doc.getTextWidth(credsHeadingText);
+
+  // Mask border behind credential heading
+  doc.setFillColor(255, 255, 255);
+  doc.rect(x + (cardWidth - headingWidth) / 2 - 2, currentY - 1.2, headingWidth + 4, 2.4, 'F');
+  doc.text(credsHeadingText, x + (cardWidth - headingWidth) / 2, currentY + 0.6);
+
+  // 8. Credentials light box
+  currentY += 3.5;
+  const boxWidth = cardWidth - 12;
+  const boxHeight = 15;
+  doc.setFillColor(248, 250, 252); // slate-50
+  doc.setDrawColor(226, 232, 240); // slate-200
+  doc.rect(x + 6, currentY, boxWidth, boxHeight, 'FD');
+
+  // Box details
+  doc.setFontSize(7);
+  // Admission ID
+  doc.setTextColor(100, 116, 139);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Admission ID:', x + 10, currentY + 5.2);
+  doc.setTextColor(15, 23, 42);
+  doc.setFont('courier', 'bold'); // Monospace
+  doc.text(student.admissionId, x + 32, currentY + 5.2);
+
+  // Passcode
+  doc.setTextColor(100, 116, 139);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Passcode:', x + 10, currentY + 10.8);
+  doc.setTextColor(37, 99, 235); // Blue-600
+  doc.setFont('courier', 'bold');
+  doc.text(student.passcode, x + 32, currentY + 10.8);
+
+  // 9. Important guidelines separator
+  currentY += boxHeight + 3.5;
+  doc.setDrawColor(226, 232, 240); // Slate-200
+  doc.setLineDashPattern([1.5, 1.5], 0);
+  doc.line(x + 10, currentY, x + cardWidth - 10, currentY);
+
+  doc.setLineDashPattern([], 0);
+  const infoHeadingText = 'IMPORTANT';
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(5.5);
+  doc.setTextColor(148, 163, 184); // slate-400
+  const infoHeadingWidth = doc.getTextWidth(infoHeadingText);
+
+  // Mask border behind important heading
+  doc.setFillColor(255, 255, 255);
+  doc.rect(x + (cardWidth - infoHeadingWidth) / 2 - 2, currentY - 1.2, infoHeadingWidth + 4, 2.4, 'F');
+  doc.text(infoHeadingText, x + (cardWidth - infoHeadingWidth) / 2, currentY + 0.6);
+
+  // Notice items bullet points
+  currentY += 4.5;
+  doc.setFontSize(6);
+  doc.setTextColor(100, 116, 139); // slate-500
+
+  const instructions = [
+    'Keep this Election Slip confidential.',
+    'Do not share your Admission ID or Passcode.',
+    'One student can vote only once.',
+    'Contact the Election Administrator if you need assistance.'
+  ];
+
+  instructions.forEach((inst) => {
+    // Custom blue bullet
+    doc.setTextColor(37, 99, 235);
+    doc.setFont('helvetica', 'bold');
+    doc.text('*', x + 8, currentY);
+
+    // Instruction text
+    doc.setTextColor(100, 116, 139);
+    doc.setFont('helvetica', 'normal');
+    doc.text(inst, x + 11, currentY);
+    currentY += 4;
+  });
+}
+
 export default function ElectionSlips({ students, votes }: ElectionSlipsProps) {
-  // Filters
+  // Navigation & Page State
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 12;
+
+  // Search and Filters state
   const [searchQuery, setSearchQuery] = useState('');
-  const [gradeFilter, setGradeFilter] = useState('All');
-  const [classFilter, setClassFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All'); // 'All', 'Voted', 'Pending'
+  const [selectedGrade, setSelectedGrade] = useState('All');
+  const [selectedDivision, setSelectedDivision] = useState('All');
+  const [selectedStatus, setSelectedStatus] = useState('All');
 
-  // Selection state
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // View style toggle: 'table' or 'grid'
+  const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
 
-  // Customization configurations
-  const [schoolName, setSchoolName] = useState('SMART SCHOOL ELECTION SYSTEM');
-  const [electionYear, setElectionYear] = useState('2026-2027');
-  const [electionOfficer, setElectionOfficer] = useState('Chief Election Officer');
-  const [portalUrl, setPortalUrl] = useState(window.location.origin || 'https://schoolvote.com/student/login');
-  const [showQrCode, setShowQrCode] = useState(true);
-  const [showSeal, setShowSeal] = useState(true);
-  const [paperSize, setPaperSize] = useState<'A4' | 'A5' | 'A6'>('A4');
+  // PDF Target Paper Size Format: 'A4' | 'A5' | 'A6'
+  const [pdfFormat, setPdfFormat] = useState<'A4' | 'A5' | 'A6'>('A4');
 
-  // Interactive UI states
-  const [activePreviewSlip, setActivePreviewSlip] = useState<Student | null>(null);
-  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-  const [isPrinting, setIsPrinting] = useState(false);
+  // Multi-select bulk state
+  const [selectedStudentIds, setSelectedStudentIds] = useState<Record<string, boolean>>({});
+
+  // Dynamic print pool state (updated just before triggering native print)
   const [printPool, setPrintPool] = useState<Student[]>([]);
 
-  // Get unique grades present in student list dynamically
+  // State for single slip inspection modal
+  const [previewStudent, setPreviewStudent] = useState<Student | null>(null);
+
+  // Track password reveal toggles per student
+  const [revealedPasscodes, setRevealedPasscodes] = useState<Record<string, boolean>>({});
+
+  // Track vote counts/statuses dynamically from incoming votes list
+  const votedSet = useMemo(() => {
+    return new Set(votes.map((v) => v.studentId));
+  }, [votes]);
+
+  // Extract unique grades list
   const availableGrades = useMemo(() => {
-    const grades = new Set<string>();
-    students.forEach(s => {
-      if (s.grade) grades.add(s.grade);
+    const gradesSet = new Set<string>();
+    students.forEach((student) => {
+      if (student.grade) {
+        const raw = student.grade.split('-')[0].trim();
+        gradesSet.add(raw);
+      }
     });
-    return ['All', ...Array.from(grades).sort()];
+    return Array.from(gradesSet).sort();
   }, [students]);
 
-  // Compute voting statuses
-  const votedMap = useMemo(() => {
-    const map = new Map<string, boolean>();
-    students.forEach(s => {
-      // Check both local Student object flag and dynamic votes list matching admissionId
-      const voted = s.hasVoted || votes.some(v => v.studentId.trim().toUpperCase() === s.admissionId.trim().toUpperCase());
-      map.set(s.admissionId, voted);
+  // Extract unique divisions list
+  const availableDivisions = useMemo(() => {
+    const divisionsSet = new Set<string>();
+    students.forEach((student) => {
+      const raw = student.grade || '';
+      if (raw.includes('-')) {
+        const parts = raw.split('-');
+        if (parts[1]) divisionsSet.add(parts[1].trim());
+      } else {
+        const match = raw.match(/^(Grade\s+\d+|\d+)\s+([A-D])$/i);
+        if (match && match[2]) divisionsSet.add(match[2].trim());
+      }
     });
-    return map;
-  }, [students, votes]);
+    return Array.from(divisionsSet).sort();
+  }, [students]);
 
-  // Filter students
+  // Filter students based on all selected criteria
   const filteredStudents = useMemo(() => {
-    return students.filter(student => {
-      const q = searchQuery.toLowerCase().trim();
-      const nameMatch = student.studentName.toLowerCase().includes(q);
-      const idMatch = student.admissionId.toLowerCase().includes(q);
-      const searchMatch = !q || nameMatch || idMatch;
+    return students.filter((student) => {
+      // 1. Search Query (Admission ID, Name, Grade)
+      const matchesSearch = 
+        student.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        student.admissionId.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        student.grade.toLowerCase().includes(searchQuery.toLowerCase());
 
-      const gradeMatch = gradeFilter === 'All' || student.grade === gradeFilter;
-      
-      const cleanClassFilter = classFilter.toLowerCase().trim();
-      const classMatch = !cleanClassFilter || student.grade.toLowerCase().includes(cleanClassFilter);
+      // 2. Grade Filter
+      const rawGrade = student.grade || '';
+      const baseGrade = rawGrade.split('-')[0].trim();
+      const matchesGrade = selectedGrade === 'All' || baseGrade === selectedGrade;
 
-      const hasVoted = votedMap.get(student.admissionId) || false;
-      const statusMatch = statusFilter === 'All' || 
-                          (statusFilter === 'Voted' && hasVoted) || 
-                          (statusFilter === 'Pending' && !hasVoted);
+      // 3. Division Filter
+      let div = 'A';
+      if (rawGrade.includes('-')) {
+        div = rawGrade.split('-')[1]?.trim() || 'A';
+      } else {
+        const match = rawGrade.match(/^(Grade\s+\d+|\d+)\s+([A-D])$/i);
+        if (match && match[2]) div = match[2].trim();
+      }
+      const matchesDivision = selectedDivision === 'All' || div === selectedDivision;
 
-      return searchMatch && gradeMatch && classMatch && statusMatch;
+      // 4. Voting Status Filter
+      const hasVoted = votedSet.has(student.admissionId) || !!student.hasVoted;
+      const matchesStatus = 
+        selectedStatus === 'All' ||
+        (selectedStatus === 'voted' && hasVoted) ||
+        (selectedStatus === 'pending' && !hasVoted);
+
+      return matchesSearch && matchesGrade && matchesDivision && matchesStatus;
     });
-  }, [students, searchQuery, gradeFilter, classFilter, statusFilter, votedMap]);
+  }, [students, searchQuery, selectedGrade, selectedDivision, selectedStatus, votedSet]);
 
-  // Sync selection set on filter changes
-  const allFilteredSelected = useMemo(() => {
-    if (filteredStudents.length === 0) return false;
-    return filteredStudents.every(s => selectedIds.has(s.admissionId));
-  }, [filteredStudents, selectedIds]);
+  // Pagination current slice
+  const paginatedStudents = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredStudents.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredStudents, currentPage]);
 
-  const handleSelectAllToggle = () => {
-    const next = new Set(selectedIds);
-    if (allFilteredSelected) {
-      filteredStudents.forEach(s => next.delete(s.admissionId));
-    } else {
-      filteredStudents.forEach(s => next.add(s.admissionId));
-    }
-    setSelectedIds(next);
-    playSystemSound('select_sound');
-  };
+  const totalPages = Math.ceil(filteredStudents.length / itemsPerPage);
 
+  // Statistics calculation
+  const stats = useMemo(() => {
+    const total = students.length;
+    let completed = 0;
+    students.forEach((s) => {
+      if (votedSet.has(s.admissionId) || s.hasVoted) {
+        completed++;
+      }
+    });
+    return {
+      total,
+      completed,
+      pending: total - completed,
+      selectedCount: Object.values(selectedStudentIds).filter(Boolean).length
+    };
+  }, [students, votedSet, selectedStudentIds]);
+
+  // Handle individual select toggle
   const handleSelectToggle = (admissionId: string) => {
-    const next = new Set(selectedIds);
-    if (next.has(admissionId)) {
-      next.delete(admissionId);
+    setSelectedStudentIds((prev) => ({
+      ...prev,
+      [admissionId]: !prev[admissionId],
+    }));
+  };
+
+  // Determine if all filtered students on current page are selected
+  const isAllCurrentPageSelected = useMemo(() => {
+    if (paginatedStudents.length === 0) return false;
+    return paginatedStudents.every((s) => selectedStudentIds[s.admissionId]);
+  }, [paginatedStudents, selectedStudentIds]);
+
+  // Handle Page Select All Toggle
+  const handleSelectAllPageToggle = () => {
+    const nextSelected = { ...selectedStudentIds };
+    if (isAllCurrentPageSelected) {
+      paginatedStudents.forEach((s) => {
+        nextSelected[s.admissionId] = false;
+      });
     } else {
-      next.add(admissionId);
+      paginatedStudents.forEach((s) => {
+        nextSelected[s.admissionId] = true;
+      });
     }
-    setSelectedIds(next);
+    setSelectedStudentIds(nextSelected);
+  };
+
+  // Clear all selections
+  const handleClearSelections = () => {
+    setSelectedStudentIds({});
     playSystemSound('select_sound');
   };
 
+  // Select all filtered students globally
+  const handleSelectAllFiltered = () => {
+    const nextSelected: Record<string, boolean> = {};
+    filteredStudents.forEach((s) => {
+      nextSelected[s.admissionId] = true;
+    });
+    setSelectedStudentIds(nextSelected);
+    playSystemSound('select_sound');
+  };
+
+  // Extract selected student list
   const selectedStudentsList = useMemo(() => {
-    return students.filter(s => selectedIds.has(s.admissionId));
-  }, [students, selectedIds]);
+    return students.filter((s) => selectedStudentIds[s.admissionId]);
+  }, [students, selectedStudentIds]);
 
-  // Generate QR Code URL
-  const getQrCodeUrl = (student: Student) => {
-    const qrData = `Portal: ${portalUrl}\nID: ${student.admissionId}\nPass: ${student.passcode}`;
-    return `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(qrData)}`;
-  };
-
-  // Helper to pre-fetch QR images as Base64 for PDF inserting
-  const fetchBase64Image = async (url: string): Promise<string> => {
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
-    } catch (e) {
-      console.warn("Could not fetch base64 QR Code. Proceeding with vector fallback in PDF:", e);
-      return '';
-    }
-  };
-
-  // Automated PDF generation engine using jsPDF
-  const handleDownloadPDF = async (targetStudents: Student[]) => {
-    if (targetStudents.length === 0) {
-      alert("Please select at least one student to download their slips.");
+  // Trigger standard browser printing for a list of students
+  const handlePrintSlips = (studentsToPrint: Student[]) => {
+    if (studentsToPrint.length === 0) {
+      alert('No slips selected to print.');
       return;
     }
-
-    setIsGeneratingPdf(true);
     playSystemSound('select_sound');
+    setPrintPool(studentsToPrint);
 
-    try {
-      // Create PDF instance
-      // Paper configurations
-      // A4 = [210, 297] mm
-      // A5 = [148, 210] mm
-      // A6 = [105, 148] mm
-      const format = paperSize.toLowerCase() as 'a4' | 'a5' | 'a6';
-      const doc = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: format,
-      });
-
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-
-      // Slips layout mapping
-      let cols = 1;
-      let rows = 1;
-      let cardWidth = pageWidth - 20;
-      let cardHeight = pageHeight - 20;
-
-      if (format === 'a4') {
-        cols = 2;
-        rows = 3;
-        cardWidth = 90;
-        cardHeight = 85;
-      } else if (format === 'a5') {
-        cols = 1;
-        rows = 2;
-        cardWidth = 128;
-        cardHeight = 95;
-      } else if (format === 'a6') {
-        cols = 1;
-        rows = 1;
-        cardWidth = pageWidth - 10;
-        cardHeight = pageHeight - 10;
-      }
-
-      const marginX = (pageWidth - (cols * cardWidth)) / 2;
-      const marginY = (pageHeight - (rows * cardHeight)) / 2;
-
-      for (let index = 0; index < targetStudents.length; index++) {
-        const student = targetStudents[index];
-
-        // Pagination indices
-        const pageIdx = Math.floor(index / (cols * rows));
-        const itemOnPageIdx = index % (cols * rows);
-        const colIdx = itemOnPageIdx % cols;
-        const rowIdx = Math.floor(itemOnPageIdx / cols);
-
-        if (index > 0 && itemOnPageIdx === 0) {
-          doc.addPage();
-        }
-
-        const x = marginX + colIdx * cardWidth;
-        const y = marginY + rowIdx * cardHeight;
-
-        // Card Border with light gray
-        doc.setDrawColor(200, 200, 200);
-        doc.setFillColor(255, 255, 255);
-        doc.roundedRect(x + 1, y + 1, cardWidth - 2, cardHeight - 2, 3, 3, 'FD');
-
-        // Top Border Decor Line (School Blue Accent)
-        doc.setFillColor(79, 70, 229); // indigo-600
-        doc.rect(x + 1, y + 1, cardWidth - 2, 3, 'F');
-
-        // Header School Name
-        doc.setTextColor(30, 41, 59); // slate-800
-        doc.setFont('Helvetica', 'bold');
-        doc.setFontSize(cardWidth > 100 ? 9 : 7);
-        doc.text(schoolName.toUpperCase(), x + (cardWidth / 2), y + 9, { align: 'center' });
-
-        // Document Title
-        doc.setTextColor(79, 70, 229); // indigo-600
-        doc.setFontSize(cardWidth > 100 ? 11 : 9);
-        doc.text("Election Login Slip", x + (cardWidth / 2), y + 14, { align: 'center' });
-
-        // Horizontal Separator
-        doc.setDrawColor(241, 245, 249);
-        doc.line(x + 5, y + 17, x + cardWidth - 5, y + 17);
-
-        // Student Info Block
-        doc.setTextColor(100, 116, 139); // slate-500
-        doc.setFont('Helvetica', 'normal');
-        doc.setFontSize(cardWidth > 100 ? 8 : 7);
-
-        const textStartY = y + 22;
-        const lineSpacing = 4.5;
-
-        doc.text("Student Name:", x + 6, textStartY);
-        doc.text("Admission ID:", x + 6, textStartY + lineSpacing);
-        doc.text("Grade / Class:", x + 6, textStartY + (lineSpacing * 2));
-        doc.text("Election Year:", x + 6, textStartY + (lineSpacing * 3));
-
-        // Info Values
-        doc.setTextColor(15, 23, 42); // slate-900
-        doc.setFont('Helvetica', 'bold');
-        doc.text(student.studentName, x + 30, textStartY);
-        doc.text(student.admissionId, x + 30, textStartY + lineSpacing);
-        doc.text(student.grade, x + 30, textStartY + (lineSpacing * 2));
-        doc.text(electionYear, x + 30, textStartY + (lineSpacing * 3));
-
-        // Grey Credentials Box
-        const credBoxY = textStartY + (lineSpacing * 3.5);
-        const credBoxH = cardHeight > 90 ? 16 : 14;
-        doc.setFillColor(248, 250, 252); // slate-50
-        doc.setDrawColor(226, 232, 240); // slate-200
-        doc.roundedRect(x + 5, credBoxY, cardWidth - 10, credBoxH, 1.5, 1.5, 'FD');
-
-        // Credentials text
-        doc.setTextColor(71, 85, 105); // slate-600
-        doc.setFont('Helvetica', 'bold');
-        doc.setFontSize(7);
-        doc.text("VOTER PORTAL SECURE CREDENTIALS", x + (cardWidth / 2), credBoxY + 4.5, { align: 'center' });
-
-        doc.setFont('Courier', 'bold');
-        doc.setFontSize(cardWidth > 100 ? 10 : 8.5);
-        doc.setTextColor(220, 38, 38); // rose-600
-        doc.text(`ID: ${student.admissionId}   Passcode: ${student.passcode}`, x + (cardWidth / 2), credBoxY + (credBoxH / 2) + 3, { align: 'center' });
-
-        // Instructions List
-        const instStartY = credBoxY + credBoxH + 4;
-        doc.setFont('Helvetica', 'normal');
-        doc.setFontSize(cardWidth > 100 ? 6.5 : 5.5);
-        doc.setTextColor(100, 116, 139); // slate-500
-
-        const insts = [
-          "• Keep this secure passcode confidential.",
-          "• Log in to cast your ballot once only.",
-          "• Report any issues to the Officer."
-        ];
-
-        insts.forEach((inst, i) => {
-          doc.text(inst, x + 6, instStartY + (i * 3));
-        });
-
-        // Add QR Code if enabled
-        if (showQrCode) {
-          const qrUrl = getQrCodeUrl(student);
-          const qrBase64 = await fetchBase64Image(qrUrl);
-          if (qrBase64) {
-            const qrSize = cardHeight > 90 ? 15 : 12;
-            const qrX = x + cardWidth - qrSize - 6;
-            const qrY = y + 19;
-            doc.addImage(qrBase64, 'PNG', qrX, qrY, qrSize, qrSize);
-          }
-        }
-
-        // Add School Seal / Signature Lines at bottom
-        const footerY = y + cardHeight - 8;
-        doc.setDrawColor(241, 245, 249);
-        doc.line(x + 5, footerY - 2, x + cardWidth - 5, footerY - 2);
-
-        doc.setFont('Helvetica', 'bold');
-        doc.setFontSize(5.5);
-        doc.setTextColor(148, 163, 184); // slate-400
-
-        if (showSeal) {
-          doc.text("OFFICIAL SEAL", x + 10, footerY);
-          doc.text("VALID FOR ELECTION", x + 10, footerY + 2.5);
-        }
-
-        doc.text("SIGNATURE", x + cardWidth - 30, footerY);
-        doc.text(electionOfficer, x + cardWidth - 30, footerY + 2.5);
-      }
-
-      // Save PDF document
-      doc.save(`Election_Slips_${targetStudents.length}_Students.pdf`);
-      playSystemSound('winner_sound');
-    } catch (error) {
-      console.error("PDF generation failed:", error);
-      alert("Failed to download PDF slips. Please ensure you are connected to the network to pull QR configurations.");
-    } finally {
-      setIsGeneratingPdf(false);
-    }
-  };
-
-  // Handle standard browser print view trigger
-  const handlePrintSlips = (targetStudents: Student[]) => {
-    if (targetStudents.length === 0) {
-      alert("Please select student slips to print.");
-      return;
-    }
-
-    setPrintPool(targetStudents);
-    setIsPrinting(true);
-    playSystemSound('select_sound');
-
-    // Timeout triggers window.print after React renders the printable frame
+    // Briefly delay the native window.print call to guarantee DOM is updated
     setTimeout(() => {
       window.print();
-      setIsPrinting(false);
-    }, 500);
+    }, 200);
+  };
+
+  // Programmatic custom vector PDF downloader for any list of students
+  const handleDownloadPDF = (studentsToDownload: Student[], size: 'A4' | 'A5' | 'A6') => {
+    if (studentsToDownload.length === 0) {
+      alert('No student slips available to download.');
+      return;
+    }
+
+    playSystemSound('select_sound');
+
+    // Page configurations based on paper size
+    let format: 'a4' | 'a5' | 'a6' = 'a4';
+    let orientation: 'portrait' | 'landscape' = 'portrait';
+    let cols = 2;
+    let rows = 2;
+    let leftMargin = 10;
+    let topMargin = 15;
+    let colSpacing = 10;
+    let rowSpacing = 10;
+    const cardWidth = 90;
+    const cardHeight = 125;
+
+    if (size === 'A4') {
+      format = 'a4';
+      orientation = 'portrait';
+      cols = 2;
+      rows = 2;
+      leftMargin = 10;
+      topMargin = 15;
+      colSpacing = 10;
+      rowSpacing = 10;
+    } else if (size === 'A5') {
+      // Landscape A5 allows placing 2 cards beautifully side-by-side!
+      format = 'a5';
+      orientation = 'landscape';
+      cols = 2;
+      rows = 1;
+      leftMargin = 10;
+      topMargin = 11;
+      colSpacing = 10;
+      rowSpacing = 0;
+    } else if (size === 'A6') {
+      format = 'a6';
+      orientation = 'portrait';
+      cols = 1;
+      rows = 1;
+      leftMargin = 7.5;
+      topMargin = 11.5;
+      colSpacing = 0;
+      rowSpacing = 0;
+    }
+
+    const slipsPerPage = cols * rows;
+    const doc = new jsPDF({
+      orientation: orientation,
+      unit: 'mm',
+      format: format
+    });
+
+    studentsToDownload.forEach((student, index) => {
+      const pageNum = Math.floor(index / slipsPerPage);
+      const indexOnPage = index % slipsPerPage;
+      const row = Math.floor(indexOnPage / cols);
+      const col = indexOnPage % cols;
+
+      // Add page if we have exceeded the previous page limits
+      if (index > 0 && indexOnPage === 0) {
+        doc.addPage(format, orientation);
+      }
+
+      const posX = leftMargin + col * (cardWidth + colSpacing);
+      const posY = topMargin + row * (cardHeight + rowSpacing);
+
+      drawVectorSlipToPDF(doc, student, posX, posY);
+    });
+
+    const stamp = new Date().toISOString().split('T')[0];
+    doc.save(`Election_Login_Slips_${size}_${stamp}.pdf`);
+  };
+
+  // Toggle reveal state for a specific student's passcode
+  const togglePasscodeReveal = (admissionId: string) => {
+    setRevealedPasscodes(prev => ({
+      ...prev,
+      [admissionId]: !prev[admissionId]
+    }));
   };
 
   return (
     <div className="space-y-6">
-      
-      {/* HEADER HERO AREA */}
-      <div className="border-b border-slate-100 pb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-black text-slate-800 tracking-tight flex items-center gap-2">
-            <Printer className="h-5 w-5 text-indigo-600" />
-            Voter Login Slips & Credentials Generator
-          </h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Generate, customize, and print official voting slips containing students' confidential passcodes.
-          </p>
+      {/* Injectable CSS print stylesheet to strip out non-print elements */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          /* Hide everything except print-section */
+          body * {
+            visibility: hidden !important;
+          }
+          #print-section, #print-section * {
+            visibility: visible !important;
+          }
+          #print-section {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            background: white !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
+          
+          /* Render grid for multiple printed slips nicely */
+          .print-slips-grid {
+            display: grid !important;
+            grid-template-columns: repeat(2, 1fr) !important;
+            gap: 15px !important;
+            width: 100% !important;
+            box-sizing: border-box !important;
+          }
+
+          .print-slip-card {
+            border: 2px dashed #94a3b8 !important;
+            border-radius: 10px !important;
+            padding: 20px !important;
+            background: white !important;
+            width: 100% !important;
+            max-width: 440px !important;
+            box-shadow: none !important;
+            color: black !important;
+            box-sizing: border-box !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            margin-bottom: 20px !important;
+          }
+          
+          .print-blue-header {
+            background-color: #2563eb !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            color: white !important;
+            padding: 12px !important;
+            text-align: center !important;
+            border-radius: 6px !important;
+          }
+        }
+      `}} />
+
+      {/* Overview stats board */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
+          <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">Total Students</span>
+          <span className="text-2xl font-black text-slate-900 mt-1">{stats.total}</span>
+          <span className="text-[10px] text-slate-400 mt-1.5 font-medium">Registered Voter Database</span>
         </div>
-        
-        {/* ACTION BUTTONS */}
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => handlePrintSlips(selectedStudentsList)}
-            disabled={selectedIds.size === 0}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-              selectedIds.size > 0 
-                ? 'bg-slate-900 text-white hover:bg-slate-800' 
-                : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-            }`}
-          >
-            <Printer className="h-4 w-4" />
-            <span>Print Selected ({selectedIds.size})</span>
-          </button>
-
-          <button
-            onClick={() => handleDownloadPDF(selectedStudentsList)}
-            disabled={selectedIds.size === 0 || isGeneratingPdf}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
-              selectedIds.size > 0 
-                ? 'border-indigo-200 text-indigo-700 bg-indigo-50/50 hover:bg-indigo-50' 
-                : 'border-slate-100 text-slate-400 bg-slate-50 cursor-not-allowed'
-            }`}
-          >
-            {isGeneratingPdf ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>Generating PDF...</span>
-              </>
-            ) : (
-              <>
-                <Download className="h-4 w-4" />
-                <span>Download PDF ({selectedIds.size})</span>
-              </>
-            )}
-          </button>
-
-          <button
-            onClick={() => handlePrintSlips(filteredStudents)}
-            className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm hover:shadow-indigo-500/10"
-          >
-            <Printer className="h-4 w-4" />
-            <span>Print All Filtered ({filteredStudents.length})</span>
-          </button>
-
-          <button
-            onClick={() => handleDownloadPDF(filteredStudents)}
-            disabled={isGeneratingPdf}
-            className="px-3.5 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
-          >
-            {isGeneratingPdf ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4" />
-            )}
-            <span>Bulk Download All Slips ({filteredStudents.length})</span>
-          </button>
+        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
+          <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">Slips Selected</span>
+          <span className="text-2xl font-black text-blue-600 mt-1">{stats.selectedCount}</span>
+          {stats.selectedCount > 0 ? (
+            <button 
+              onClick={handleClearSelections}
+              className="text-[10px] text-rose-600 font-bold hover:underline text-left mt-1.5 transition-all cursor-pointer"
+            >
+              Clear Selected ({stats.selectedCount})
+            </button>
+          ) : (
+            <span className="text-[10px] text-slate-400 mt-1.5 font-medium">No bulk selection</span>
+          )}
+        </div>
+        <div className="bg-emerald-50/50 p-5 rounded-2xl border border-emerald-100 shadow-sm flex flex-col justify-between">
+          <span className="text-[10px] font-extrabold text-emerald-600 uppercase tracking-widest">Voting Completed</span>
+          <span className="text-2xl font-black text-emerald-800 mt-1">{stats.completed}</span>
+          <span className="text-[10px] text-emerald-600 mt-1.5 font-medium">Completed Ballot Votes</span>
+        </div>
+        <div className="bg-amber-50/50 p-5 rounded-2xl border border-amber-100 shadow-sm flex flex-col justify-between">
+          <span className="text-[10px] font-extrabold text-amber-600 uppercase tracking-widest">Voting Pending</span>
+          <span className="text-2xl font-black text-amber-800 mt-1">{stats.pending}</span>
+          <span className="text-[10px] text-amber-600 mt-1.5 font-medium">Pending Election Slips</span>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* LEFT COLUMN: FILTERS AND SETTINGS */}
-        <div className="space-y-6 lg:col-span-1">
-          
-          {/* SEARCH & FILTER MODULE */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm space-y-4">
-            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2 pb-2 border-b border-slate-50">
-              <SlidersHorizontal className="h-4 w-4 text-indigo-500" />
-              Slip Search & Filtering
-            </h3>
-
-            <div className="space-y-3.5 text-xs">
-              {/* Name / ID Search */}
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-600 flex items-center gap-1">
-                  <Search className="h-3.5 w-3.5" /> Search Student
-                </label>
-                <input
-                  type="text"
-                  placeholder="Admission ID or Student Name..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-xs transition-all placeholder:text-slate-400 text-slate-800"
-                />
-              </div>
-
-              {/* Grade Filter */}
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-600">Grade / Standard</label>
-                <select
-                  value={gradeFilter}
-                  onChange={(e) => setGradeFilter(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-xs text-slate-800 transition-all"
-                >
-                  {availableGrades.map(g => (
-                    <option key={g} value={g}>{g}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Division / Class Custom Search */}
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-600">Class / Division Search</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Division A, 10-A, or A"
-                  value={classFilter}
-                  onChange={(e) => setClassFilter(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-xs transition-all placeholder:text-slate-400 text-slate-800"
-                />
-              </div>
-
-              {/* Voting Status Filter */}
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-600">Voting Status</label>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-xs text-slate-800 transition-all"
-                >
-                  <option value="All">All Students</option>
-                  <option value="Pending">Pending (Not Voted)</option>
-                  <option value="Voted">Completed (Voted)</option>
-                </select>
-              </div>
-            </div>
+      {/* Main filter, format select and controls console */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-5 font-sans">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
+              <FileText className="h-5.5 w-5.5 text-blue-600" />
+              Election Slip Generator
+            </h2>
+            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+              Generate individual or bulk election login slips containing secure voting passcodes. Clean professional design, automatically paginated.
+            </p>
           </div>
 
-          {/* CUSTOMIZATION AND PRINT SETTINGS */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm space-y-4">
-            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2 pb-2 border-b border-slate-50">
-              <Settings2 className="h-4 w-4 text-indigo-500" />
-              Customize Slip Design
-            </h3>
-
-            <div className="space-y-3.5 text-xs">
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-600">School Name Header</label>
-                <input
-                  type="text"
-                  value={schoolName}
-                  onChange={(e) => setSchoolName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-xs text-slate-800"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-600">Election Year</label>
-                <input
-                  type="text"
-                  value={electionYear}
-                  onChange={(e) => setElectionYear(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-xs text-slate-800"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-600">Election Officer Title</label>
-                <input
-                  type="text"
-                  value={electionOfficer}
-                  onChange={(e) => setElectionOfficer(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-xs text-slate-800"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-600">Voting Portal URL</label>
-                <input
-                  type="url"
-                  value={portalUrl}
-                  onChange={(e) => setPortalUrl(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-xs text-slate-800 font-mono"
-                />
-              </div>
-
-              <div className="space-y-2 pt-1 border-t border-slate-50">
-                <label className="font-bold text-slate-600 block">Print Settings</label>
-                
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-slate-500 text-[11px]">Paper Template Size</span>
-                  <select
-                    value={paperSize}
-                    onChange={(e) => setPaperSize(e.target.value as any)}
-                    className="px-2 py-1 rounded-lg border border-slate-200 text-[11px] text-slate-700 bg-white"
+          {/* Quick instructions/actions bar */}
+          <div className="flex flex-wrap items-center gap-3">
+            {/* PDF Format Selector Group */}
+            <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+              <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider pl-1.5 font-mono">Paper:</span>
+              <div className="flex gap-1">
+                {(['A4', 'A5', 'A6'] as const).map((sz) => (
+                  <button
+                    key={sz}
+                    onClick={() => {
+                      setPdfFormat(sz);
+                      playSystemSound('select_sound');
+                    }}
+                    className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
+                      pdfFormat === sz 
+                        ? 'bg-blue-600 text-white shadow-sm' 
+                        : 'bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-800'
+                    }`}
                   >
-                    <option value="A4">A4 (Grid layout)</option>
-                    <option value="A5">A5 (Half-page)</option>
-                    <option value="A6">A6 (Single slip)</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-slate-500 text-[11px]">Generate QR Codes</span>
-                  <input
-                    type="checkbox"
-                    checked={showQrCode}
-                    onChange={(e) => setShowQrCode(e.target.checked)}
-                    className="h-4 w-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-slate-500 text-[11px]">Show Official Seal Mark</span>
-                  <input
-                    type="checkbox"
-                    checked={showSeal}
-                    onChange={(e) => setShowSeal(e.target.checked)}
-                    className="h-4 w-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
-                  />
-                </div>
+                    {sz}
+                  </button>
+                ))}
               </div>
+            </div>
+
+            {/* Main Action Buttons */}
+            <div className="flex gap-2">
+              {stats.selectedCount > 0 ? (
+                <>
+                  <button
+                    onClick={() => handlePrintSlips(selectedStudentsList)}
+                    className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer"
+                    title="Print slips for selected students using browser"
+                  >
+                    <Printer className="h-4 w-4" />
+                    Print Selected ({stats.selectedCount})
+                  </button>
+                  <button
+                    onClick={() => handleDownloadPDF(selectedStudentsList, pdfFormat)}
+                    className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer"
+                    title={`Download multi-page PDF formatted to ${pdfFormat}`}
+                  >
+                    <Download className="h-4 w-4" />
+                    Download Selected PDF
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={handleSelectAllFiltered}
+                    className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    Select All Filtered ({filteredStudents.length})
+                  </button>
+                  <button
+                    onClick={() => handlePrintSlips(filteredStudents)}
+                    disabled={filteredStudents.length === 0}
+                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-800 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Printer className="h-4 w-4" />
+                    Print All Filtered
+                  </button>
+                  <button
+                    onClick={() => handleDownloadPDF(filteredStudents, pdfFormat)}
+                    disabled={filteredStudents.length === 0}
+                    className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download PDF ({pdfFormat})
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
 
-        {/* MIDDLE/RIGHT COLUMN: STUDENT CREDENTIALS TABLE */}
-        <div className="space-y-6 lg:col-span-2">
-          
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col min-h-[500px]">
-            
-            {/* Table Header Controls */}
-            <div className="p-4 bg-slate-50 border-b border-slate-100 flex flex-wrap justify-between items-center gap-3">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleSelectAllToggle}
-                  className="p-1 text-slate-500 hover:text-indigo-600 rounded transition-colors"
-                  title="Toggle Select All Filtered"
-                >
-                  {allFilteredSelected ? (
-                    <CheckSquare className="h-5 w-5 text-indigo-600" />
-                  ) : (
-                    <Square className="h-5 w-5" />
-                  )}
-                </button>
-                <span className="text-xs font-bold text-slate-700">
-                  {selectedIds.size} selected of {filteredStudents.length} students filtered
-                </span>
-              </div>
+        {/* Filters and Layout controls panel */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-2">
+          {/* Search bar */}
+          <div className="relative lg:col-span-2">
+            <Search className="absolute left-3.5 top-2.5 h-4 w-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by ID, Student Name, or Grade..."
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium font-sans"
+            />
+          </div>
 
-              {selectedIds.size > 0 && (
-                <button
-                  onClick={() => {
-                    setSelectedIds(new Set());
-                    playSystemSound('select_sound');
-                  }}
-                  className="px-2 py-1 text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 rounded-lg hover:bg-rose-100 transition-colors cursor-pointer"
-                >
-                  Deselect All
-                </button>
-              )}
+          {/* Grade filter */}
+          <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 border border-slate-200 rounded-xl">
+            <Filter className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+            <select
+              value={selectedGrade}
+              onChange={(e) => {
+                setSelectedGrade(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="w-full bg-transparent text-xs text-slate-700 focus:outline-none cursor-pointer font-semibold font-sans"
+            >
+              <option value="All">All Grades</option>
+              {availableGrades.map((grade) => (
+                <option key={grade} value={grade}>{grade}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Division filter */}
+          <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 border border-slate-200 rounded-xl">
+            <Filter className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+            <select
+              value={selectedDivision}
+              onChange={(e) => {
+                setSelectedDivision(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="w-full bg-transparent text-xs text-slate-700 focus:outline-none cursor-pointer font-semibold font-sans"
+            >
+              <option value="All">All Divisions</option>
+              {availableDivisions.map((div) => (
+                <option key={div} value={div}>Division {div}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Voting Status filter */}
+          <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 border border-slate-200 rounded-xl">
+            <Filter className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+            <select
+              value={selectedStatus}
+              onChange={(e) => {
+                setSelectedStatus(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="w-full bg-transparent text-xs text-slate-700 focus:outline-none cursor-pointer font-semibold font-sans"
+            >
+              <option value="All">All Statuses</option>
+              <option value="pending">Pending (Not Voted)</option>
+              <option value="voted">Voted (Completed)</option>
+            </select>
+          </div>
+        </div>
+
+        {/* View Toggle Bar (Grid vs Table) */}
+        <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1 font-mono">
+            <Info className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+            PDF format is generated programmatically to ensure instant vector crispness.
+          </p>
+
+          <div className="flex gap-1 bg-slate-100 p-1 rounded-xl">
+            <button
+              onClick={() => {
+                setViewMode('table');
+                playSystemSound('select_sound');
+              }}
+              className={`p-1.5 rounded-lg transition-all flex items-center gap-1.5 text-xs font-bold cursor-pointer ${
+                viewMode === 'table'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+              title="Table view list"
+            >
+              <List className="h-4 w-4" />
+              Student Table
+            </button>
+            <button
+              onClick={() => {
+                setViewMode('grid');
+                playSystemSound('select_sound');
+              }}
+              className={`p-1.5 rounded-lg transition-all flex items-center gap-1.5 text-xs font-bold cursor-pointer ${
+                viewMode === 'grid'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+              title="Grid view cards"
+            >
+              <LayoutGrid className="h-4 w-4" />
+              Cards Grid
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Slips Viewport */}
+      {filteredStudents.length === 0 ? (
+        <div className="text-center py-16 bg-white border border-slate-200/80 rounded-2xl shadow-sm">
+          <FileText className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+          <p className="text-slate-800 font-bold text-sm font-sans">No students match your filter criteria.</p>
+          <p className="text-xs text-slate-400 mt-1 font-sans">Try resetting the filters or typing a different search query.</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {/* Action header bar inside viewport */}
+          <div className="flex items-center justify-between bg-slate-100 p-3 px-4 rounded-xl border border-slate-200 font-sans">
+            <div className="flex items-center gap-2.5">
+              <button
+                onClick={handleSelectAllPageToggle}
+                className="p-1 bg-white hover:bg-slate-50 rounded-lg border border-slate-200 text-slate-600 transition-colors flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
+              >
+                {isAllCurrentPageSelected ? (
+                  <CheckSquare className="h-4.5 w-4.5 text-blue-600" />
+                ) : (
+                  <Square className="h-4.5 w-4.5 text-slate-400" />
+                )}
+                Select Page ({paginatedStudents.length})
+              </button>
             </div>
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider font-mono">
+              Showing {Math.min(filteredStudents.length, (currentPage - 1) * itemsPerPage + 1)} - {Math.min(filteredStudents.length, currentPage * itemsPerPage)} of {filteredStudents.length} Students
+            </p>
+          </div>
 
-            {/* Students List Table */}
-            <div className="flex-1 overflow-y-auto max-h-[480px]">
-              {filteredStudents.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-center space-y-2">
-                  <GraduationCap className="h-10 w-10 text-slate-300" />
-                  <p className="text-xs font-bold text-slate-500">No student accounts match search criteria.</p>
-                  <p className="text-[10px] text-slate-400">Clear filters or import student register database first.</p>
-                </div>
-              ) : (
-                <table className="w-full text-xs text-left border-collapse">
+          {/* TABLE MODE RENDER */}
+          {viewMode === 'table' ? (
+            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden font-sans">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
                   <thead>
-                    <tr className="bg-slate-50 text-slate-500 font-bold border-b border-slate-100 text-[10px] uppercase tracking-wider">
-                      <th className="py-2.5 px-4 w-10">Select</th>
-                      <th className="py-2.5 px-3">Student Profile</th>
-                      <th className="py-2.5 px-3">Credentials</th>
-                      <th className="py-2.5 px-3">Status</th>
-                      <th className="py-2.5 px-4 text-right">Actions</th>
+                    <tr className="bg-slate-50/75 border-b border-slate-200 text-slate-400 text-[10px] font-extrabold uppercase tracking-widest font-mono">
+                      <th className="py-3 px-4 w-12">Select</th>
+                      <th className="py-3 px-4">Student Name</th>
+                      <th className="py-3 px-4">Admission ID</th>
+                      <th className="py-3 px-4">Grade & Div</th>
+                      <th className="py-3 px-4">Passcode</th>
+                      <th className="py-3 px-4">Voting Status</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredStudents.map((student) => {
-                      const isSelected = selectedIds.has(student.admissionId);
-                      const hasVoted = votedMap.get(student.admissionId) || false;
+                  <tbody className="divide-y divide-slate-100 text-xs">
+                    {paginatedStudents.map((student) => {
+                      const hasVoted = votedSet.has(student.admissionId) || student.hasVoted;
+                      const isRevealed = !!revealedPasscodes[student.admissionId];
 
                       return (
                         <tr 
-                          key={student.admissionId}
+                          key={student.admissionId} 
                           className={`hover:bg-slate-50/50 transition-colors ${
-                            isSelected ? 'bg-indigo-50/15' : ''
+                            selectedStudentIds[student.admissionId] ? 'bg-blue-50/10' : ''
                           }`}
                         >
-                          {/* Checkbox Column */}
-                          <td className="py-3 px-4">
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={() => handleSelectToggle(student.admissionId)}
-                              className="h-4 w-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
-                            />
+                          {/* Selector */}
+                          <td className="py-3.5 px-4">
+                            <button
+                              onClick={() => handleSelectToggle(student.admissionId)}
+                              className="text-slate-500 hover:text-blue-600 transition-colors cursor-pointer"
+                            >
+                              {selectedStudentIds[student.admissionId] ? (
+                                <CheckSquare className="h-5 w-5 text-blue-600" />
+                              ) : (
+                                <Square className="h-5 w-5 text-slate-300" />
+                              )}
+                            </button>
                           </td>
 
-                          {/* Student Info Column */}
-                          <td className="py-3 px-3">
-                            <div className="space-y-0.5">
-                              <span className="font-bold text-slate-800 block">{student.studentName}</span>
-                              <div className="flex items-center gap-1.5 text-[10px] text-slate-500">
-                                <span className="font-mono bg-slate-100 px-1 py-0.2 rounded text-[9px] border border-slate-200">
-                                  {student.admissionId}
-                                </span>
-                                <span>•</span>
-                                <span className="font-semibold text-indigo-700 uppercase bg-indigo-50/50 px-1 py-0.2 rounded text-[9px]">
-                                  {student.grade}
-                                </span>
-                              </div>
+                          {/* Student Name */}
+                          <td className="py-3.5 px-4 font-bold text-slate-900">
+                            {student.studentName}
+                          </td>
+
+                          {/* Admission ID */}
+                          <td className="py-3.5 px-4 font-semibold text-slate-600 font-mono">
+                            {student.admissionId}
+                          </td>
+
+                          {/* Grade & Div */}
+                          <td className="py-3.5 px-4 text-slate-600 font-medium font-sans">
+                            {student.grade}
+                          </td>
+
+                          {/* Passcode (Secured toggle) */}
+                          <td className="py-3.5 px-4">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200 select-all">
+                                {isRevealed ? student.passcode : '••••••'}
+                              </span>
+                              <button
+                                onClick={() => togglePasscodeReveal(student.admissionId)}
+                                className="text-slate-400 hover:text-slate-600 transition-all p-1 hover:bg-slate-100 rounded cursor-pointer"
+                                title={isRevealed ? "Hide passcode" : "Reveal passcode"}
+                              >
+                                {isRevealed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                              </button>
                             </div>
                           </td>
 
-                          {/* Credentials Column */}
-                          <td className="py-3 px-3">
-                            <div className="font-mono text-[10px] space-y-0.5">
-                              <p className="text-slate-500">
-                                User: <strong className="text-slate-700">{student.admissionId}</strong>
-                              </p>
-                              <p className="text-slate-500">
-                                Pass: <strong className="text-rose-600 bg-rose-50 border border-rose-100 px-1.5 py-0.2 rounded text-[9px] font-bold">{student.passcode}</strong>
-                              </p>
-                            </div>
-                          </td>
-
-                          {/* voting Status Column */}
-                          <td className="py-3 px-3">
+                          {/* Status */}
+                          <td className="py-3.5 px-4">
                             {hasVoted ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 font-mono">
                                 <Check className="h-3 w-3" />
                                 Voted
                               </span>
                             ) : (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-400 bg-slate-100 px-2.5 py-0.5 rounded-full">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200 font-mono">
+                                <HelpCircle className="h-3 w-3" />
                                 Pending
                               </span>
                             )}
                           </td>
 
-                          {/* Quick Actions Column */}
-                          <td className="py-3 px-4 text-right">
+                          {/* Action cell */}
+                          <td className="py-3.5 px-4 text-right">
                             <div className="flex items-center justify-end gap-1.5">
                               <button
-                                onClick={() => setActivePreviewSlip(student)}
-                                className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
-                                title="Preview Design Card"
+                                onClick={() => {
+                                  playSystemSound('select_sound');
+                                  setPreviewStudent(student);
+                                }}
+                                className="p-1 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors text-xs font-bold flex items-center gap-1 cursor-pointer"
+                                title="Generate Slip preview modal"
                               >
-                                <Eye className="h-4 w-4" />
+                                <Eye className="h-3.5 w-3.5" />
+                                Generate Slip
                               </button>
                               <button
                                 onClick={() => handlePrintSlips([student])}
-                                className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                                title="Print Slip"
+                                className="p-1 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors cursor-pointer"
+                                title="Quick print slip"
                               >
-                                <Printer className="h-4 w-4" />
+                                <Printer className="h-3.5 w-3.5" />
                               </button>
                               <button
-                                onClick={() => handleDownloadPDF([student])}
-                                className="p-1.5 text-slate-400 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
-                                title="Download PDF"
+                                onClick={() => handleDownloadPDF([student], 'A6')}
+                                className="p-1 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded transition-colors cursor-pointer"
+                                title="Quick download PDF (A6 size)"
                               >
-                                <Download className="h-4 w-4" />
+                                <Download className="h-3.5 w-3.5" />
                               </button>
                             </div>
                           </td>
@@ -743,272 +1206,120 @@ export default function ElectionSlips({ students, votes }: ElectionSlipsProps) {
                     })}
                   </tbody>
                 </table>
-              )}
+              </div>
             </div>
-          </div>
-        </div>
-      </div>
+          ) : (
+            /* GRID CARDS MODE RENDER */
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 font-sans">
+              {paginatedStudents.map((student) => (
+                <SingleElectionSlip
+                  key={student.admissionId}
+                  student={student}
+                  isSelected={!!selectedStudentIds[student.admissionId]}
+                  onSelectToggle={() => handleSelectToggle(student.admissionId)}
+                  onPrint={() => handlePrintSlips([student])}
+                  onDownloadPDF={() => handleDownloadPDF([student], 'A6')}
+                />
+              ))}
+            </div>
+          )}
 
-      {/* INDIVIDUAL MODAL PREVIEW SLIP */}
-      {activePreviewSlip && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4" id="slip-preview-modal">
-          <div className="bg-white rounded-3xl max-w-sm w-full border border-slate-100 shadow-2xl overflow-hidden flex flex-col">
-            
-            {/* Modal Header */}
-            <div className="p-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
-              <span className="text-xs font-bold text-slate-800">Election Slip Preview</span>
-              <button 
+          {/* Pagination Navigation */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between bg-white p-4 rounded-xl border border-slate-200 shadow-sm font-sans">
+              <button
                 onClick={() => {
-                  setActivePreviewSlip(null);
-                  playSystemSound('select_sound');
+                  setCurrentPage((p) => Math.max(1, p - 1));
+                  window.scrollTo({ top: 300, behavior: 'smooth' });
                 }}
-                className="p-1 hover:bg-slate-200 rounded-full transition-colors cursor-pointer text-slate-500 text-xs font-bold"
+                disabled={currentPage === 1}
+                className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent transition-colors text-slate-600 flex items-center gap-1 text-xs font-bold cursor-pointer"
               >
-                ✕
+                <ChevronLeft className="h-4 w-4" />
+                Previous
+              </button>
+
+              <span className="text-xs text-slate-500 font-bold">
+                Page {currentPage} of {totalPages}
+              </span>
+
+              <button
+                onClick={() => {
+                  setCurrentPage((p) => Math.min(totalPages, p + 1));
+                  window.scrollTo({ top: 300, behavior: 'smooth' });
+                }}
+                disabled={currentPage === totalPages}
+                className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent transition-colors text-slate-600 flex items-center gap-1 text-xs font-bold cursor-pointer"
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* =========================================================================
+          INTERACTIVE SLIP PREVIEW MODAL
+          ========================================================================= */}
+      {previewStudent && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden max-w-md w-full animate-in fade-in zoom-in-95 duration-200 flex flex-col font-sans">
+            
+            {/* Modal Header bar */}
+            <div className="p-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="text-xs font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-1.5 font-mono">
+                <FileText className="h-4 w-4 text-blue-600" />
+                Voter Election Slip Preview
+              </h3>
+              <button
+                onClick={() => setPreviewStudent(null)}
+                className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all cursor-pointer"
+              >
+                <X className="h-5 w-5" />
               </button>
             </div>
 
-            {/* Card Content styled as a high fidelity physical slip */}
-            <div className="p-6 flex-1 flex flex-col items-center">
-              
-              {/* Slip Card */}
-              <div className="w-full bg-white border border-slate-200 rounded-2xl shadow-md p-5 relative overflow-hidden space-y-4">
-                {/* Border line */}
-                <div className="absolute top-0 left-0 right-0 h-1.5 bg-indigo-600"></div>
-
-                {/* Header */}
-                <div className="text-center space-y-1">
-                  <div className="flex justify-center items-center gap-1">
-                    <span className="text-lg">🏫</span>
-                    <span className="text-[10px] font-black text-slate-800 tracking-tight uppercase leading-none">
-                      {schoolName}
-                    </span>
-                  </div>
-                  <h4 className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-none mt-1">
-                    SMART SCHOOL ELECTION SYSTEM
-                  </h4>
-                  <div className="inline-block bg-indigo-50 border border-indigo-100/50 text-indigo-700 text-[10px] font-extrabold px-2 py-0.5 rounded-full mt-1">
-                    Election Login Slip
-                  </div>
-                </div>
-
-                <div className="border-t border-slate-100 my-2"></div>
-
-                {/* Slip Grid Details */}
-                <div className="grid grid-cols-3 gap-y-2 text-[10px]">
-                  <span className="text-slate-400 font-medium">Student Name</span>
-                  <span className="col-span-2 text-slate-800 font-bold text-right">{activePreviewSlip.studentName}</span>
-
-                  <span className="text-slate-400 font-medium">Admission ID</span>
-                  <span className="col-span-2 text-slate-800 font-bold font-mono text-right">{activePreviewSlip.admissionId}</span>
-
-                  <span className="text-slate-400 font-medium">Grade / Class</span>
-                  <span className="col-span-2 text-slate-800 font-bold text-right">{activePreviewSlip.grade}</span>
-
-                  <span className="text-slate-400 font-medium">Election Year</span>
-                  <span className="col-span-2 text-slate-800 font-bold text-right">{electionYear}</span>
-                </div>
-
-                {/* Credentials Container */}
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center space-y-1.5">
-                  <span className="text-[8px] font-black text-slate-500 uppercase tracking-wider block">
-                    Secure Portal Login Credentials
-                  </span>
-                  <div className="font-mono text-xs flex justify-around items-center bg-white border border-slate-100 py-1.5 rounded-lg">
-                    <div className="space-y-0.5">
-                      <span className="text-[8px] text-slate-400 block">ADMISSION ID</span>
-                      <strong className="text-slate-700 text-[11px]">{activePreviewSlip.admissionId}</strong>
-                    </div>
-                    <div className="h-6 w-[1px] bg-slate-100"></div>
-                    <div className="space-y-0.5">
-                      <span className="text-[8px] text-slate-400 block">PASSCODE</span>
-                      <strong className="text-rose-600 text-[11px]">{activePreviewSlip.passcode}</strong>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Instructions */}
-                <div className="space-y-1 text-[8px] text-slate-400 leading-normal">
-                  <p className="flex gap-1.5"><span className="text-slate-300">•</span> Keep this slip and passcode confidential.</p>
-                  <p className="flex gap-1.5"><span className="text-slate-300">•</span> Log in to the portal and cast your ballot once only.</p>
-                  <p className="flex gap-1.5"><span className="text-slate-300">•</span> Do not share your passcode with any other voter.</p>
-                  <p className="flex gap-1.5"><span className="text-slate-300">•</span> Contact the Election Officer if you lose this slip.</p>
-                </div>
-
-                {/* Optional QR Code */}
-                {showQrCode && (
-                  <div className="flex items-center justify-center pt-1 gap-2 border-t border-slate-50">
-                    <div className="h-14 w-14 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-center overflow-hidden">
-                      <img 
-                        src={getQrCodeUrl(activePreviewSlip)} 
-                        alt="Slip Portal QR" 
-                        className="h-12 w-12 object-contain"
-                        referrerPolicy="no-referrer"
-                      />
-                    </div>
-                    <div className="text-[7px] text-slate-400 leading-normal max-w-[150px]">
-                      <p className="font-bold text-slate-600">Scan to Vote</p>
-                      <p>Points directly to the secure electronic polling portal. Scan with your tablet or phone camera.</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Footer seal or officer */}
-                <div className="border-t border-slate-100 pt-2 flex justify-between items-center text-[7px] text-slate-400">
-                  {showSeal ? (
-                    <div className="space-y-0.5">
-                      <p className="font-bold text-indigo-700">OFFICIAL SEAL</p>
-                      <p>VALIDATED SLIP</p>
-                    </div>
-                  ) : <div />}
-                  <div className="text-right space-y-0.5">
-                    <p className="font-bold text-slate-700 flex items-center justify-end gap-0.5">
-                      <Signature className="h-2 w-2 text-slate-400" />
-                      SIGNATURE
-                    </p>
-                    <p className="font-medium text-slate-500">{electionOfficer}</p>
-                  </div>
-                </div>
-
-              </div>
-
+            {/* Modal Body scroll area */}
+            <div className="p-6 overflow-y-auto max-h-[75vh] flex justify-center bg-slate-50/50">
+              <SingleElectionSlip 
+                student={previewStudent}
+                onPrint={() => handlePrintSlips([previewStudent])}
+                onDownloadPDF={() => handleDownloadPDF([previewStudent], 'A6')}
+              />
             </div>
 
-            {/* Modal Actions */}
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex gap-2">
+            {/* Modal Action footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2">
               <button
-                onClick={() => handlePrintSlips([activePreviewSlip])}
-                className="flex-1 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                onClick={() => handleDownloadPDF([previewStudent], 'A6')}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <Download className="h-4 w-4" />
+                Download PDF (A6)
+              </button>
+              <button
+                onClick={() => handlePrintSlips([previewStudent])}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow transition-all flex items-center gap-1.5 cursor-pointer"
               >
                 <Printer className="h-4 w-4" />
                 Print Slip
               </button>
-              <button
-                onClick={() => handleDownloadPDF([activePreviewSlip])}
-                className="flex-1 py-2 border border-slate-200 hover:bg-slate-100 text-slate-700 bg-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <Download className="h-4 w-4" />
-                Download PDF
-              </button>
             </div>
-
           </div>
         </div>
       )}
 
-      {/* HIDDEN INLINE PRINT UTILITY BLOCK */}
-      {/* This renders only when printing is triggered (window.print()) */}
-      {isPrinting && (
-        <div id="print-section" className="hidden print:block absolute inset-0 bg-white text-black p-0 m-0 z-[999999]">
-          
-          {/* Sizing wrapper based on paper templates */}
-          <div className={`grid gap-4 ${
-            paperSize === 'A4' ? 'grid-cols-2 p-4' : 'grid-cols-1 p-2'
-          }`}>
-            {printPool.map((student, idx) => (
-              <div 
-                key={student.admissionId} 
-                className={`border border-gray-400 rounded-xl p-5 bg-white flex flex-col relative overflow-hidden space-y-3 page-break-inside-avoid ${
-                  paperSize === 'A6' ? 'h-[140mm] w-[100mm]' : 'h-[85mm]'
-                }`}
-                style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}
-              >
-                {/* Accent strip */}
-                <div className="absolute top-0 left-0 right-0 h-1.5 bg-indigo-600"></div>
-
-                {/* Header */}
-                <div className="text-center space-y-0.5">
-                  <h3 className="text-xs font-extrabold text-slate-900 tracking-tight uppercase leading-none">
-                    🏫 {schoolName}
-                  </h3>
-                  <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest leading-none mt-1">
-                    SMART SCHOOL ELECTION SYSTEM
-                  </p>
-                  <p className="text-[10px] font-black text-indigo-700 bg-indigo-50 border border-indigo-100 inline-block px-2.5 py-0.5 rounded-full mt-1.5">
-                    Election Login Slip
-                  </p>
-                </div>
-
-                <hr className="border-slate-100 my-1" />
-
-                {/* Details Grid */}
-                <div className="grid grid-cols-3 gap-y-1 text-[10px]">
-                  <span className="text-slate-500">Student Name:</span>
-                  <strong className="col-span-2 text-slate-900 text-right">{student.studentName}</strong>
-
-                  <span className="text-slate-500">Admission ID:</span>
-                  <strong className="col-span-2 text-slate-900 font-mono text-right">{student.admissionId}</strong>
-
-                  <span className="text-slate-500">Grade / Class:</span>
-                  <strong className="col-span-2 text-slate-900 text-right">{student.grade}</strong>
-
-                  <span className="text-slate-500">Election Year:</span>
-                  <strong className="col-span-2 text-slate-900 text-right">{electionYear}</strong>
-                </div>
-
-                {/* Credentials block */}
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-center">
-                  <span className="text-[8px] font-black text-slate-500 uppercase tracking-wider block mb-1">
-                    VOTER PORTAL SECURE CREDENTIALS
-                  </span>
-                  <div className="font-mono text-xs flex justify-around items-center bg-white border border-slate-100 py-1 rounded-lg">
-                    <div className="space-y-0.5">
-                      <span className="text-[8px] text-slate-400 block">ADMISSION ID</span>
-                      <strong className="text-slate-800 text-[11px]">{student.admissionId}</strong>
-                    </div>
-                    <div className="h-5 w-[1px] bg-slate-100"></div>
-                    <div className="space-y-0.5">
-                      <span className="text-[8px] text-slate-400 block">PASSCODE</span>
-                      <strong className="text-rose-600 text-[11px]">{student.passcode}</strong>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Instructions */}
-                <div className="space-y-0.5 text-[8px] text-slate-500 leading-normal">
-                  <p>• Keep this slip confidential.</p>
-                  <p>• Use the Admission ID and Passcode to log in.</p>
-                  <p>• One student can vote only once.</p>
-                  <p>• Do not share your passcode.</p>
-                  <p>• Contact the Election Officer if you lose this slip.</p>
-                </div>
-
-                {/* QR code and Seal / Sig lines */}
-                <div className="flex justify-between items-center pt-2 border-t border-slate-100 text-[8px] text-slate-500">
-                  {showQrCode ? (
-                    <div className="flex items-center gap-1.5">
-                      <img 
-                        src={getQrCodeUrl(student)} 
-                        alt="QR Code" 
-                        className="h-10 w-10 border border-slate-200 rounded p-0.5" 
-                        referrerPolicy="no-referrer"
-                      />
-                      <span className="text-[7px] text-slate-400 leading-tight">Scan with camera<br />to login directly</span>
-                    </div>
-                  ) : <div />}
-
-                  <div className="flex gap-4">
-                    {showSeal && (
-                      <div className="text-center">
-                        <div className="h-5 w-5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-full flex items-center justify-center font-bold text-[7px] mx-auto">
-                          SEAL
-                        </div>
-                        <span className="text-[6px] text-indigo-600 block mt-0.5 font-bold uppercase">Validated</span>
-                      </div>
-                    )}
-                    <div className="text-right">
-                      <div className="h-5 border-b border-dashed border-slate-300 w-16 ml-auto"></div>
-                      <span className="text-[6px] font-bold text-slate-400 block uppercase mt-0.5">Election Officer</span>
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-            ))}
-          </div>
+      {/* =========================================================================
+          HIDDEN PRINT SECTION FOR BROWSERS
+          ========================================================================= */}
+      <div id="print-section" className="hidden">
+        <div className="print-slips-grid">
+          {printPool.map((student) => (
+            <PrintSlip key={student.admissionId} student={student} />
+          ))}
         </div>
-      )}
-
+      </div>
     </div>
   );
 }

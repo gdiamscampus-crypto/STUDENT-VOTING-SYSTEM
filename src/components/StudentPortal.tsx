@@ -34,6 +34,15 @@ export default function StudentPortal({
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
   const [session, setSession] = useState<StudentSession | null>(null);
 
+  // Automatically read and pre-fill Student Admission ID from URL query parameters
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const idFromUrl = params.get('admissionId') || params.get('id');
+    if (idFromUrl) {
+      setStudentId(idFromUrl.toUpperCase().trim());
+    }
+  }, []);
+
   // Camera Verification States
   const [showCameraStep, setShowCameraStep] = useState(false);
   const [tempStudent, setTempStudent] = useState<StudentSession | null>(null);
@@ -709,8 +718,8 @@ export default function StudentPortal({
                                 <h5 className="font-bold text-slate-800 text-sm">
                                   {selCandidate ? (
                                     <span className="flex items-center gap-1.5 flex-wrap">
-                                      {selCandidate.symbolUrl ? (
-                                        <img src={selCandidate.symbolUrl} className="h-4 w-4 object-contain shrink-0" referrerPolicy="no-referrer" alt="symbol" />
+                                      {(selCandidate.identitySymbolImageUrl || selCandidate.symbolUrl) ? (
+                                        <img src={selCandidate.identitySymbolImageUrl || selCandidate.symbolUrl} className="h-4 w-4 object-contain shrink-0" referrerPolicy="no-referrer" alt="symbol" />
                                       ) : (
                                         <span className="text-sm">{selCandidate.symbol.split(' ')[0]}</span>
                                       )}
@@ -838,9 +847,9 @@ export default function StudentPortal({
                           <div className="flex gap-4">
                             {/* Circular Profile Photo Design with default placeholder */}
                             <div className="h-16 w-16 rounded-full border border-slate-200 overflow-hidden shrink-0 bg-slate-50 relative flex items-center justify-center">
-                              {c.photoUrl ? (
+                              {(c.avatarImageUrl || c.photoUrl) ? (
                                 <img
-                                  src={c.photoUrl}
+                                  src={c.avatarImageUrl || c.photoUrl}
                                   alt={c.name}
                                   loading="lazy"
                                   referrerPolicy="no-referrer"
@@ -848,7 +857,7 @@ export default function StudentPortal({
                                 />
                               ) : (
                                 <div className={`h-full w-full bg-gradient-to-tr ${theme.gradient} text-white font-bold flex flex-col items-center justify-center text-lg overflow-hidden`}>
-                                  <span className="text-2xl mt-1">{c.symbol.split(' ')[0]}</span>
+                                  <span className="text-2xl mt-1">{(c.identitySymbolImageUrl || c.symbolUrl) ? <img src={c.identitySymbolImageUrl || c.symbolUrl} className="h-6 w-6 object-contain inline-block" referrerPolicy="no-referrer" alt="symbol" /> : c.symbol.split(' ')[0]}</span>
                                   <span className="text-[9px] font-black tracking-wider bg-black/15 w-full py-0.5 text-center mt-auto uppercase leading-none font-mono">
                                     {c.avatarSeed}
                                   </span>
@@ -866,13 +875,18 @@ export default function StudentPortal({
                                 </span>
                               </div>
                               <h5 className="font-extrabold text-slate-800 text-base leading-tight mt-1">{c.name}</h5>
-                              <div className="flex items-center gap-1 text-xs text-indigo-600 font-medium italic mt-0.5">
-                                {c.symbolUrl ? (
-                                  <img src={c.symbolUrl} referrerPolicy="no-referrer" className="h-4 w-4 object-contain shrink-0" alt="symbol" />
+                              <div className="flex items-center gap-1.5 text-xs text-indigo-600 font-medium italic mt-0.5">
+                                {(c.identitySymbolImageUrl || c.symbolUrl) ? (
+                                  <>
+                                    <img src={c.identitySymbolImageUrl || c.symbolUrl} referrerPolicy="no-referrer" className="h-4 w-4 object-contain shrink-0" alt="symbol" />
+                                    <span>Custom Identity Symbol</span>
+                                  </>
                                 ) : (
-                                  <span>{c.symbol.split(' ')[0]}</span>
+                                  <>
+                                    <span>{c.symbol.split(' ')[0]}</span>
+                                    <span>Symbol: {c.symbol}</span>
+                                  </>
                                 )}
-                                <span>Symbol: {c.symbol}</span>
                               </div>
                             </div>
                           </div>
@@ -1002,8 +1016,8 @@ export default function StudentPortal({
                               <span>- {pos.name}:</span>
                               {selCandidate ? (
                                 <span className="font-bold text-indigo-700 flex items-center gap-1">
-                                  {selCandidate.symbolUrl ? (
-                                    <img src={selCandidate.symbolUrl} className="h-3.5 w-3.5 object-contain shrink-0" referrerPolicy="no-referrer" alt="symbol" />
+                                  {(selCandidate.identitySymbolImageUrl || selCandidate.symbolUrl) ? (
+                                    <img src={selCandidate.identitySymbolImageUrl || selCandidate.symbolUrl} className="h-3.5 w-3.5 object-contain shrink-0" referrerPolicy="no-referrer" alt="symbol" />
                                   ) : (
                                     <span>{selCandidate.symbol.split(' ')[0]}</span>
                                   )}

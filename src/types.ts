@@ -29,6 +29,8 @@ export interface Candidate {
   colorTheme: string; // Theme color (indigo, emerald, etc.)
   photoUrl?: string;  // Candidate photo URL
   symbolUrl?: string; // Symbol image URL
+  identitySymbolImageUrl?: string; // Public Google Drive URL for identity symbol
+  avatarImageUrl?: string; // Public Google Drive URL for candidate avatar
   votesCount: number;
 
   // Exact Firestore schema alignment fields

@@ -6,6 +6,7 @@
 import { useState, useEffect, FormEvent, useRef, ChangeEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
+import { getAuth, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { 
   Candidate, 
   Vote, 
@@ -322,7 +323,7 @@ export default function AdminPortal({
   // Candidate Registration States
   const [candName, setCandName] = useState('');
   const [candPositionId, setCandPositionId] = useState(positions[0]?.id || 'pos-1');
-  const [candGrade, setCandGrade] = useState('Grade 10');
+  const [candGrade, setCandGrade] = useState('Grade 6');
   const [candDivision, setCandDivision] = useState('A');
   const [candRoll, setCandRoll] = useState('');
   const [candSymbol, setCandSymbol] = useState('⭐');
@@ -336,6 +337,20 @@ export default function AdminPortal({
   const [isPhotoLinkValid, setIsPhotoLinkValid] = useState<boolean | null>(null);
   const [isValidatingPhoto, setIsValidatingPhoto] = useState(false);
   const [photoValidationError, setPhotoValidationError] = useState<string | null>(null);
+
+  // Photo automatic upload states
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [googleToken, setGoogleToken] = useState<string | null>(null);
+  const photoFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Identity Symbol automatic upload states
+  const [symbolUrl, setSymbolUrl] = useState('');
+  const [isUploadingSymbol, setIsUploadingSymbol] = useState(false);
+  const [uploadSymbolProgress, setUploadSymbolProgress] = useState(0);
+  const [uploadSymbolError, setUploadSymbolError] = useState<string | null>(null);
+  const symbolFileInputRef = useRef<HTMLInputElement>(null);
 
   const [editingCandidateId, setEditingCandidateId] = useState<string | null>(null);
 
@@ -352,39 +367,398 @@ export default function AdminPortal({
     return null;
   };
 
-  useEffect(() => {
-    if (!photoDriveLink.trim()) {
-      setPhotoUrl('');
-      setIsPhotoLinkValid(null);
-      setPhotoValidationError(null);
+  // Dynamic helper to find folder by name in user's Google Drive
+  const findFolderByName = async (token: string, folderName: string): Promise<string | null> => {
+    try {
+      const q = `mimeType = 'application/vnd.google-apps.folder' and name = '${folderName.replace(/'/g, "\\'")}' and trashed = false`;
+      const response = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) {
+        throw new Error(`Folder search failed: ${response.statusText}`);
+      }
+      const data = await response.json();
+      if (data.files && data.files.length > 0) {
+        return data.files[0].id;
+      }
+    } catch (err) {
+      console.error(`Error finding folder ${folderName}:`, err);
+    }
+    return null;
+  };
+
+  // Dynamic helper to create folder by name in user's Google Drive
+  const createFolderByName = async (token: string, folderName: string): Promise<string> => {
+    const response = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: folderName,
+        mimeType: 'application/vnd.google-apps.folder'
+      })
+    });
+    if (!response.ok) {
+      throw new Error(`Folder creation failed: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data.id;
+  };
+
+  // Dynamic helper to get or create folder by name
+  const getOrCreateFolderIdByName = async (token: string, folderName: string): Promise<string> => {
+    const existingId = await findFolderByName(token, folderName);
+    if (existingId) return existingId;
+    return await createFolderByName(token, folderName);
+  };
+
+  const uploadPhotoToDrive = async (token: string, file: File, folderId: string, onProgress: (pct: number) => void): Promise<string> => {
+    const metadata = {
+      name: `${Date.now()}_${file.name}`,
+      mimeType: file.type,
+      parents: [folderId]
+    };
+
+    const url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id';
+    const boundary = '3d0f14a0c41f9b0b';
+    const delimiter = `\r\n--${boundary}\r\n`;
+    const closeDelimiter = `\r\n--${boundary}--`;
+
+    const fileContentPromise = new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(file);
+    });
+
+    const fileBytes = await fileContentPromise;
+    const encoder = new TextEncoder();
+    const metadataPart = `${delimiter}Content-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`;
+    const mediaPartHeader = `${delimiter}Content-Type: ${file.type}\r\n\r\n`;
+    
+    const metadataBytes = encoder.encode(metadataPart);
+    const mediaPartHeaderBytes = encoder.encode(mediaPartHeader);
+    const closeDelimiterBytes = encoder.encode(closeDelimiter);
+
+    const totalLength = metadataBytes.length + mediaPartHeaderBytes.length + fileBytes.byteLength + closeDelimiterBytes.length;
+    const combinedBytes = new Uint8Array(totalLength);
+
+    let offset = 0;
+    combinedBytes.set(metadataBytes, offset);
+    offset += metadataBytes.length;
+    combinedBytes.set(mediaPartHeaderBytes, offset);
+    offset += mediaPartHeaderBytes.length;
+    combinedBytes.set(new Uint8Array(fileBytes), offset);
+    offset += fileBytes.byteLength;
+    combinedBytes.set(closeDelimiterBytes, offset);
+
+    return new Promise<string>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', url);
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.setRequestHeader('Content-Type', `multipart/related; boundary=${boundary}`);
+
+      if (xhr.upload) {
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            onProgress(percent);
+          }
+        };
+      }
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const response = JSON.parse(xhr.responseText);
+            resolve(response.id);
+          } catch (e) {
+            reject(new Error('Invalid response'));
+          }
+        } else {
+          reject(new Error(`Status ${xhr.status}`));
+        }
+      };
+
+      xhr.onerror = () => reject(new Error('Network error'));
+      xhr.send(combinedBytes);
+    });
+  };
+
+  const shareFileOnDrive = async (token: string, fileId: string): Promise<void> => {
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        role: 'reader',
+        type: 'anyone'
+      })
+    });
+    if (!response.ok) {
+      throw new Error(`Sharing failed: ${response.statusText}`);
+    }
+  };
+
+  const deleteFileFromDrive = async (token: string, fileId: string): Promise<void> => {
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+    if (!response.ok) {
+      console.error(`Failed to delete file from Drive: ${response.statusText}`);
+    }
+  };
+
+  // Triggers device file picker / Google OAuth popup
+  const handleUploadClick = async () => {
+    setUploadError(null);
+    let token = googleToken;
+    if (!token) {
+      try {
+        setIsUploading(true);
+        const auth = getAuth();
+        const provider = new GoogleAuthProvider();
+        provider.addScope('https://www.googleapis.com/auth/drive.file');
+        const result = await signInWithPopup(auth, provider);
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        if (credential?.accessToken) {
+          token = credential.accessToken;
+          setGoogleToken(token);
+        } else {
+          throw new Error("Did not receive Google Drive Access Token");
+        }
+      } catch (err: any) {
+        console.error("Google Auth popup failed:", err);
+        if (err?.code === 'auth/popup-closed-by-user') {
+          setUploadError("The login popup was closed before completion. Please keep the window open to authorize Google Drive access.");
+        } else if (err?.code === 'auth/cancelled-popup-request') {
+          setUploadError("Only one authorization popup can be active at a time. Please wait or refresh.");
+        } else {
+          setUploadError("Image upload failed. Please try again.");
+        }
+        playSystemSound('warning_sound');
+        setIsUploading(false);
+        return;
+      } finally {
+        setIsUploading(false);
+      }
+    }
+
+    if (token) {
+      photoFileInputRef.current?.click();
+    }
+  };
+
+  // Handles actual file selection and automatic upload to Google Drive
+  const handlePhotoFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate size: 5MB
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError("File size exceeds 5 MB maximum limit.");
+      playSystemSound('warning_sound');
       return;
     }
 
-    const fileId = extractGoogleDriveId(photoDriveLink);
-    if (!fileId) {
-      setIsPhotoLinkValid(false);
-      setPhotoValidationError('Invalid Google Drive URL pattern.');
-      setPhotoUrl('');
+    // Validate type
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      setUploadError("Invalid file type. Accept only JPG, JPEG, PNG, and WEBP files.");
+      playSystemSound('warning_sound');
       return;
     }
 
-    const directUrl = `https://lh3.googleusercontent.com/d/${fileId}`;
-    setPhotoUrl(directUrl);
-    setIsValidatingPhoto(true);
-    setPhotoValidationError(null);
+    let token = googleToken;
+    if (!token) {
+      setUploadError("Image upload failed. Please try again.");
+      return;
+    }
 
-    const img = new Image();
-    img.onload = () => {
+    setIsUploading(true);
+    setUploadProgress(0);
+    setUploadError(null);
+
+    try {
+      // 1. Get or create 'Candidate Photos' folder
+      const folderId = await getOrCreateFolderIdByName(token, 'Candidate Photos');
+
+      // 2. Upload file to that folder
+      const fileId = await uploadPhotoToDrive(token, file, folderId, (percent) => {
+        setUploadProgress(percent);
+      });
+
+      // 3. Make anyone with link viewer
+      await shareFileOnDrive(token, fileId);
+
+      // 4. Generate public direct URL
+      const directUrl = `https://drive.google.com/uc?export=view&id=${fileId}`;
+      setPhotoUrl(directUrl);
       setIsPhotoLinkValid(true);
-      setIsValidatingPhoto(false);
-      setPhotoValidationError(null);
-    };
-    img.onerror = () => {
-      setIsPhotoLinkValid(false);
-      setIsValidatingPhoto(false);
-      setPhotoValidationError('Unable to load photo asset. Check public access permission details.');
-    };
-    img.src = directUrl;
+      playSystemSound('vote_success');
+    } catch (err) {
+      console.error("Automatic upload failed:", err);
+      setUploadError("Image upload failed. Please try again.");
+      playSystemSound('warning_sound');
+    } finally {
+      setIsUploading(false);
+      if (photoFileInputRef.current) {
+        photoFileInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Deletes the uploaded file from Google Drive and clears state
+  const handleDeletePhoto = async () => {
+    if (!photoUrl) return;
+    const fileId = extractGoogleDriveId(photoUrl);
+
+    setPhotoUrl('');
+    setUploadError(null);
+    setIsPhotoLinkValid(null);
+
+    if (fileId && googleToken) {
+      try {
+        await deleteFileFromDrive(googleToken, fileId);
+      } catch (err) {
+        console.error("Failed to delete from Drive:", err);
+      }
+    }
+  };
+
+  // Triggers device file picker / Google OAuth popup for Identity Symbol
+  const handleUploadSymbolClick = async () => {
+    setUploadSymbolError(null);
+    let token = googleToken;
+    if (!token) {
+      try {
+        setIsUploadingSymbol(true);
+        const auth = getAuth();
+        const provider = new GoogleAuthProvider();
+        provider.addScope('https://www.googleapis.com/auth/drive.file');
+        const result = await signInWithPopup(auth, provider);
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        if (credential?.accessToken) {
+          token = credential.accessToken;
+          setGoogleToken(token);
+        } else {
+          throw new Error("Did not receive Google Drive Access Token");
+        }
+      } catch (err: any) {
+        console.error("Google Auth popup failed:", err);
+        if (err?.code === 'auth/popup-closed-by-user') {
+          setUploadSymbolError("The login popup was closed before completion. Please keep the window open to authorize Google Drive access.");
+        } else if (err?.code === 'auth/cancelled-popup-request') {
+          setUploadSymbolError("Only one authorization popup can be active at a time. Please wait or refresh.");
+        } else {
+          setUploadSymbolError("Image upload failed. Please try again.");
+        }
+        playSystemSound('warning_sound');
+        setIsUploadingSymbol(false);
+        return;
+      } finally {
+        setIsUploadingSymbol(false);
+      }
+    }
+
+    if (token) {
+      symbolFileInputRef.current?.click();
+    }
+  };
+
+  // Handles actual file selection and automatic upload to Google Drive for Identity Symbol
+  const handleSymbolFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate size: 2MB
+    if (file.size > 2 * 1024 * 1024) {
+      setUploadSymbolError("File size exceeds 2 MB maximum limit.");
+      playSystemSound('warning_sound');
+      return;
+    }
+
+    // Validate type: PNG, SVG, WEBP, JPG, JPEG
+    const validTypes = ['image/png', 'image/svg+xml', 'image/webp', 'image/jpeg', 'image/jpg'];
+    if (!validTypes.includes(file.type)) {
+      setUploadSymbolError("Invalid file type. Accept only PNG, SVG, WEBP, JPG, and JPEG.");
+      playSystemSound('warning_sound');
+      return;
+    }
+
+    let token = googleToken;
+    if (!token) {
+      setUploadSymbolError("Image upload failed. Please try again.");
+      return;
+    }
+
+    setIsUploadingSymbol(true);
+    setUploadSymbolProgress(0);
+    setUploadSymbolError(null);
+
+    try {
+      // 1. Get or create 'Election Identity Symbols' folder
+      const folderId = await getOrCreateFolderIdByName(token, 'Election Identity Symbols');
+
+      // 2. Upload file to that folder
+      const fileId = await uploadPhotoToDrive(token, file, folderId, (percent) => {
+        setUploadSymbolProgress(percent);
+      });
+
+      // 3. Make anyone with link viewer
+      await shareFileOnDrive(token, fileId);
+
+      // 4. Generate public direct URL
+      const directUrl = `https://drive.google.com/uc?export=view&id=${fileId}`;
+      setSymbolUrl(directUrl);
+      playSystemSound('vote_success');
+    } catch (err) {
+      console.error("Automatic upload failed:", err);
+      setUploadSymbolError("Image upload failed. Please try again.");
+      playSystemSound('warning_sound');
+    } finally {
+      setIsUploadingSymbol(false);
+      if (symbolFileInputRef.current) {
+        symbolFileInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Deletes the uploaded symbol from Google Drive and clears state
+  const handleDeleteSymbol = async () => {
+    if (!symbolUrl) return;
+    const fileId = extractGoogleDriveId(symbolUrl);
+
+    setSymbolUrl('');
+    setUploadSymbolError(null);
+
+    if (fileId && googleToken) {
+      try {
+        await deleteFileFromDrive(googleToken, fileId);
+      } catch (err) {
+        console.error("Failed to delete from Drive:", err);
+      }
+    }
+  };
+
+  useEffect(() => {
+    // Retain for backward compatibility or direct link support
+    if (!photoDriveLink.trim()) return;
+    if (photoDriveLink.includes('export=view') || photoDriveLink.includes('drive.google.com/uc')) {
+      return;
+    }
+    const fileId = extractGoogleDriveId(photoDriveLink);
+    if (!fileId) return;
+    const directUrl = `https://drive.google.com/uc?export=view&id=${fileId}`;
+    setPhotoUrl(directUrl);
+    setIsPhotoLinkValid(true);
   }, [photoDriveLink]);
 
   // Sync default position if positions load later
@@ -534,13 +908,13 @@ export default function AdminPortal({
       grade: candGrade,
       division: candDivision.trim() || 'A',
       rollNumber: candRoll.trim() || '1',
-      symbol: candSymbol.trim() || '⭐',
+      symbol: symbolUrl || '⭐',
       bio: candBio.trim() || 'No biography details provided.',
       manifesto: candManifesto.trim() || 'No manifesto detailed.',
       avatarSeed: candName.trim().slice(0, 2).toUpperCase(),
       colorTheme: candTheme,
       photoUrl: photoUrl || '',
-      symbolUrl: '',
+      symbolUrl: symbolUrl || '',
       votesCount: candidates.find(c => c.id === candId)?.votesCount || 0,
       
       candidateId: candId,
@@ -548,9 +922,12 @@ export default function AdminPortal({
       candidateName: candName.trim(),
       candidatePhotoURL: photoUrl || '',
       class: candGrade,
-      symbolURL: '',
+      symbolURL: symbolUrl || '',
       biography: candBio.trim() || 'No biography details provided.',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+
+      identitySymbolImageUrl: symbolUrl || '',
+      avatarImageUrl: photoUrl || ''
     };
 
     if (editingCandidateId) {
@@ -565,6 +942,7 @@ export default function AdminPortal({
     setCandBio('');
     setCandManifesto('');
     setPhotoUrl('');
+    setSymbolUrl('');
     setPhotoDriveLink('');
     setPhotoValidationError(null);
     setIsPhotoLinkValid(null);
@@ -582,6 +960,8 @@ export default function AdminPortal({
     setCandBio(candidate.bio);
     setCandManifesto(candidate.manifesto);
     setCandTheme(candidate.colorTheme);
+    setPhotoUrl(candidate.avatarImageUrl || candidate.photoUrl || '');
+    setSymbolUrl(candidate.identitySymbolImageUrl || candidate.symbolUrl || '');
     setPhotoDriveLink(candidate.photoUrl ? `https://drive.google.com/file/d/${extractGoogleDriveId(candidate.photoUrl)}` : '');
     setActiveModule('candidate_management');
   };
@@ -1091,7 +1471,7 @@ export default function AdminPortal({
                       onChange={(e) => setCandGrade(e.target.value)}
                       className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-xs transition-all"
                     >
-                      {['Grade 9', 'Grade 10', 'Grade 11', 'Grade 12'].map(g => (
+                      {['Grade 6', 'Grade 7', 'Grade 8'].map(g => (
                         <option key={g} value={g}>{g}</option>
                       ))}
                     </select>
@@ -1121,16 +1501,81 @@ export default function AdminPortal({
                     </div>
                   </div>
 
-                  {/* Character Symbol */}
+                  {/* Character Symbol - Replaced with Automatic Upload */}
                   <div className="space-y-1.5">
-                    <label className="font-bold text-slate-600">Identity Symbol Emoji</label>
+                    <label className="font-bold text-slate-600">Identity Symbol (Google Drive Upload)</label>
+                    
                     <input
-                      type="text"
-                      placeholder="e.g. ⭐, 🎨, 🎭"
-                      value={candSymbol}
-                      onChange={(e) => setCandSymbol(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-xs transition-all text-center"
+                      type="file"
+                      ref={symbolFileInputRef}
+                      onChange={handleSymbolFileChange}
+                      accept="image/png,image/svg+xml,image/webp,image/jpeg,image/jpg"
+                      className="hidden"
                     />
+
+                    <div className="flex items-center gap-4 p-3 bg-slate-50/50 rounded-xl border border-dashed border-slate-200 animate-fade-in min-h-[90px]">
+                      {symbolUrl ? (
+                        <div className="relative h-12 w-12 rounded-xl overflow-hidden border-2 border-indigo-500 shrink-0 shadow-sm bg-slate-100 flex items-center justify-center p-1">
+                          <img src={symbolUrl} alt="Symbol Preview" className="h-full w-full object-contain" referrerPolicy="no-referrer" />
+                        </div>
+                      ) : (
+                        <div className="h-12 w-12 rounded-xl border-2 border-dashed border-slate-200 shrink-0 flex items-center justify-center bg-slate-100 text-slate-400">
+                          <ImageIcon className="h-5 w-5" />
+                        </div>
+                      )}
+
+                      <div className="flex flex-col gap-1 flex-1 min-w-0">
+                        <div className="flex flex-wrap gap-2">
+                          {!symbolUrl ? (
+                            <button
+                              type="button"
+                              disabled={isUploadingSymbol}
+                              onClick={handleUploadSymbolClick}
+                              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                            >
+                              ✨ Upload Identity Symbol
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                disabled={isUploadingSymbol}
+                                onClick={handleUploadSymbolClick}
+                                className="px-2.5 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                              >
+                                Replace
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isUploadingSymbol}
+                                onClick={handleDeleteSymbol}
+                                className="px-2.5 py-1.5 bg-rose-50 border border-rose-100 text-rose-600 rounded-lg text-xs font-bold hover:bg-rose-100 transition-colors cursor-pointer disabled:opacity-50"
+                              >
+                                Delete
+                              </button>
+                            </>
+                          )}
+                        </div>
+
+                        <p className="text-[10px] text-slate-400 font-medium leading-normal">
+                          PNG, SVG, WEBP, JPG, JPEG. Max 2MB.
+                        </p>
+
+                        {isUploadingSymbol && (
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <Loader2 className="h-3 w-3 text-indigo-600 animate-spin" />
+                            <span className="text-[10px] text-slate-500 font-bold">Uploading... {uploadSymbolProgress}%</span>
+                          </div>
+                        )}
+
+                        {uploadSymbolError && (
+                          <p className="text-[10px] text-rose-500 font-bold flex items-center gap-1 mt-0.5">
+                            <AlertTriangle className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{uploadSymbolError}</span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
                   {/* Candidate Visual Theme */}
@@ -1147,34 +1592,89 @@ export default function AdminPortal({
                     </select>
                   </div>
 
-                  {/* Public Google Drive Photo Link */}
-                  <div className="md:col-span-2 space-y-1.5">
-                    <label className="font-bold text-slate-600">Public Google Drive Share Link (Candidate Avatar Image)</label>
+                  {/* Public Google Drive Photo Link - Replaced with Automatic Upload */}
+                  <div className="md:col-span-2 space-y-2">
+                    <label className="font-bold text-slate-600">Candidate Avatar Image (Google Drive Upload)</label>
+                    
                     <input
-                      type="url"
-                      placeholder="https://drive.google.com/file/d/.../view?usp=sharing"
-                      value={photoDriveLink}
-                      onChange={(e) => setPhotoDriveLink(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-xs transition-all"
+                      type="file"
+                      ref={photoFileInputRef}
+                      onChange={handlePhotoFileChange}
+                      accept="image/jpeg,image/jpg,image/png,image/webp"
+                      className="hidden"
                     />
-                    {isValidatingPhoto && (
-                      <p className="text-[10px] text-indigo-600 font-semibold animate-pulse flex items-center gap-1">
-                        <Loader2 className="animate-spin h-3.5 w-3.5" />
-                        Analyzing Drive file sharing metadata...
-                      </p>
-                    )}
-                    {photoValidationError && (
-                      <p className="text-[10px] text-rose-500 font-bold flex items-center gap-1">
-                        <AlertTriangle className="h-3.5 w-3.5" />
-                        {photoValidationError}
-                      </p>
-                    )}
-                    {isPhotoLinkValid === true && (
-                      <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
-                        <CheckCircle className="h-3.5 w-3.5" />
-                        Asset confirmed! File accessible in the Cloud Sandbox.
-                      </p>
-                    )}
+
+                    <div className="flex items-center gap-4 p-3 bg-slate-50/50 rounded-xl border border-dashed border-slate-200 animate-fade-in">
+                      {photoUrl ? (
+                        <div className="relative h-16 w-16 rounded-full overflow-hidden border-2 border-indigo-500 shrink-0 shadow-sm bg-slate-100">
+                          <img src={photoUrl} alt="Preview" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                        </div>
+                      ) : (
+                        <div className="h-16 w-16 rounded-full border-2 border-dashed border-slate-200 shrink-0 flex items-center justify-center bg-slate-100 text-slate-400">
+                          <ImageIcon className="h-6 w-6" />
+                        </div>
+                      )}
+
+                      <div className="flex flex-col gap-1.5 flex-1 min-w-0">
+                        <div className="flex flex-wrap gap-2">
+                          {!photoUrl ? (
+                            <button
+                              type="button"
+                              disabled={isUploading}
+                              onClick={handleUploadClick}
+                              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                            >
+                              📷 Upload Candidate Photo
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                disabled={isUploading}
+                                onClick={handleUploadClick}
+                                className="px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                              >
+                                Replace Photo
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isUploading}
+                                onClick={handleDeletePhoto}
+                                className="px-3 py-1.5 bg-rose-50 border border-rose-100 text-rose-600 rounded-lg text-xs font-bold hover:bg-rose-100 transition-colors cursor-pointer disabled:opacity-50"
+                              >
+                                Delete Photo
+                              </button>
+                            </>
+                          )}
+                        </div>
+
+                        {/* File requirements details */}
+                        <p className="text-[10px] text-slate-400 font-medium leading-normal">
+                          Supports JPG, JPEG, PNG, WEBP. Max size: 5MB.
+                        </p>
+
+                        {isUploading && (
+                          <div className="flex items-center gap-2 mt-1">
+                            <Loader2 className="h-3.5 w-3.5 text-indigo-600 animate-spin" />
+                            <span className="text-[10px] text-slate-500 font-bold">Uploading... {uploadProgress}%</span>
+                          </div>
+                        )}
+
+                        {uploadError && (
+                          <p className="text-[10px] text-rose-500 font-bold flex items-center gap-1 mt-1">
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                            {uploadError}
+                          </p>
+                        )}
+
+                        {photoUrl && !isUploading && !uploadError && (
+                          <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 mt-1 animate-fade-in">
+                            <CheckCircle className="h-3.5 w-3.5" />
+                            Uploaded & configured successfully to Google Drive.
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
                   {/* Biography */}
@@ -1221,7 +1721,8 @@ export default function AdminPortal({
                     )}
                     <button
                       type="submit"
-                      className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-lg hover:shadow-indigo-500/10 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                      disabled={isUploading}
+                      className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-lg hover:shadow-indigo-500/10 transition-colors cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {editingCandidateId ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
                       <span>{editingCandidateId ? 'Save Profile Changes' : 'Register Candidate Profile'}</span>
@@ -1248,8 +1749,13 @@ export default function AdminPortal({
                             )}
                           </div>
                           <div>
-                            <span className="font-bold text-slate-800 text-xs flex items-center gap-1">
-                              {cand.name} <span className="text-[10px]">{cand.symbol}</span>
+                            <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                              <span>{cand.name}</span>
+                              {(cand.identitySymbolImageUrl || cand.symbolUrl) ? (
+                                <img src={cand.identitySymbolImageUrl || cand.symbolUrl} className="h-4 w-4 object-contain shrink-0" referrerPolicy="no-referrer" alt="symbol" />
+                              ) : (
+                                <span className="text-[10px]">{cand.symbol}</span>
+                              )}
                             </span>
                             <p className="text-[10px] font-bold text-indigo-700 mt-0.5">{postName}</p>
                             <p className="text-[9px] text-slate-400 font-mono mt-0.5">{cand.grade} {cand.division} • Roll: {cand.rollNumber}</p>
@@ -1746,8 +2252,13 @@ export default function AdminPortal({
                         return (
                           <div key={cand.id} className="space-y-1.5 text-xs">
                             <div className="flex justify-between items-center text-slate-700">
-                              <span className="font-semibold flex items-center gap-1">
-                                {cand.symbol} {cand.name}
+                              <span className="font-semibold flex items-center gap-1.5">
+                                {(cand.identitySymbolImageUrl || cand.symbolUrl) ? (
+                                  <img src={cand.identitySymbolImageUrl || cand.symbolUrl} className="h-4 w-4 object-contain shrink-0" referrerPolicy="no-referrer" alt="symbol" />
+                                ) : (
+                                  <span>{cand.symbol}</span>
+                                )}
+                                <span>{cand.name}</span>
                               </span>
                               <span className="font-mono font-bold text-slate-800">{tally} votes ({percent}%)</span>
                             </div>
