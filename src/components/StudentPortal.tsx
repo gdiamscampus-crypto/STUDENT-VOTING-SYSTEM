@@ -11,6 +11,7 @@ import { db, doc, setDoc, handleFirestoreError, OperationType } from '../firebas
 import { User, ShieldAlert, CheckCircle, Award, Sparkles, ChevronRight, ChevronLeft, LogOut, FileText, Check, Camera, CameraOff, RotateCcw, Loader2 } from 'lucide-react';
 import Confetti from './Confetti';
 import InsightLogo from './InsightLogo';
+import { CandidatePhoto, CandidateSymbol } from './CandidateMedia';
 
 interface StudentPortalProps {
   positions: Position[];
@@ -701,13 +702,12 @@ export default function StudentPortal({
                               {/* Candidate Circular Thumbnail */}
                               {selCandidate && (
                                 <div className="h-10 w-10 rounded-full border border-slate-200 overflow-hidden shrink-0 bg-slate-100 relative flex items-center justify-center">
-                                  {selCandidate.photoUrl ? (
-                                    <img src={selCandidate.photoUrl} alt={selCandidate.name} referrerPolicy="no-referrer" className="h-full w-full object-cover" />
-                                  ) : (
-                                    <span className="text-[10px] font-bold text-slate-400 uppercase font-mono">
-                                      {selCandidate.name.slice(0, 2).toUpperCase()}
-                                    </span>
-                                  )}
+                                  <CandidatePhoto
+                                    photoUrl={selCandidate.photoUrl}
+                                    avatarImageUrl={selCandidate.avatarImageUrl}
+                                    candidatePhotoURL={selCandidate.candidatePhotoURL}
+                                    fallbackSeed={selCandidate.name}
+                                  />
                                 </div>
                               )}
 
@@ -718,11 +718,12 @@ export default function StudentPortal({
                                 <h5 className="font-bold text-slate-800 text-sm">
                                   {selCandidate ? (
                                     <span className="flex items-center gap-1.5 flex-wrap">
-                                      {(selCandidate.identitySymbolImageUrl || selCandidate.symbolUrl) ? (
-                                        <img src={selCandidate.identitySymbolImageUrl || selCandidate.symbolUrl} className="h-4 w-4 object-contain shrink-0" referrerPolicy="no-referrer" alt="symbol" />
-                                      ) : (
-                                        <span className="text-sm">{selCandidate.symbol.split(' ')[0]}</span>
-                                      )}
+                                      <CandidateSymbol
+                                        symbolUrl={selCandidate.symbolUrl}
+                                        identitySymbolImageUrl={selCandidate.identitySymbolImageUrl}
+                                        symbolURL={selCandidate.symbolURL}
+                                        symbolText={selCandidate.symbol}
+                                      />
                                       {selCandidate.name}
                                       <span className="text-xs font-mono font-normal text-slate-400 bg-slate-100 px-1.5 py-0.2 rounded">
                                         Class: {selCandidate.grade} / Div {selCandidate.division}
@@ -847,22 +848,13 @@ export default function StudentPortal({
                           <div className="flex gap-4">
                             {/* Circular Profile Photo Design with default placeholder */}
                             <div className="h-16 w-16 rounded-full border border-slate-200 overflow-hidden shrink-0 bg-slate-50 relative flex items-center justify-center">
-                              {(c.avatarImageUrl || c.photoUrl) ? (
-                                <img
-                                  src={c.avatarImageUrl || c.photoUrl}
-                                  alt={c.name}
-                                  loading="lazy"
-                                  referrerPolicy="no-referrer"
-                                  className="h-full w-full object-cover"
-                                />
-                              ) : (
-                                <div className={`h-full w-full bg-gradient-to-tr ${theme.gradient} text-white font-bold flex flex-col items-center justify-center text-lg overflow-hidden`}>
-                                  <span className="text-2xl mt-1">{(c.identitySymbolImageUrl || c.symbolUrl) ? <img src={c.identitySymbolImageUrl || c.symbolUrl} className="h-6 w-6 object-contain inline-block" referrerPolicy="no-referrer" alt="symbol" /> : c.symbol.split(' ')[0]}</span>
-                                  <span className="text-[9px] font-black tracking-wider bg-black/15 w-full py-0.5 text-center mt-auto uppercase leading-none font-mono">
-                                    {c.avatarSeed}
-                                  </span>
-                                </div>
-                              )}
+                              <CandidatePhoto
+                                photoUrl={c.photoUrl}
+                                avatarImageUrl={c.avatarImageUrl}
+                                candidatePhotoURL={c.candidatePhotoURL}
+                                fallbackSeed={c.avatarSeed || c.name}
+                                themeGradient={theme.gradient}
+                              />
                             </div>
 
                             <div className="space-y-1">
@@ -876,17 +868,13 @@ export default function StudentPortal({
                               </div>
                               <h5 className="font-extrabold text-slate-800 text-base leading-tight mt-1">{c.name}</h5>
                               <div className="flex items-center gap-1.5 text-xs text-indigo-600 font-medium italic mt-0.5">
-                                {(c.identitySymbolImageUrl || c.symbolUrl) ? (
-                                  <>
-                                    <img src={c.identitySymbolImageUrl || c.symbolUrl} referrerPolicy="no-referrer" className="h-4 w-4 object-contain shrink-0" alt="symbol" />
-                                    <span>Custom Identity Symbol</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <span>{c.symbol.split(' ')[0]}</span>
-                                    <span>Symbol: {c.symbol}</span>
-                                  </>
-                                )}
+                                <CandidateSymbol
+                                  symbolUrl={c.symbolUrl}
+                                  identitySymbolImageUrl={c.identitySymbolImageUrl}
+                                  symbolURL={c.symbolURL}
+                                  symbolText={c.symbol}
+                                />
+                                <span>Symbol</span>
                               </div>
                             </div>
                           </div>
@@ -1016,11 +1004,13 @@ export default function StudentPortal({
                               <span>- {pos.name}:</span>
                               {selCandidate ? (
                                 <span className="font-bold text-indigo-700 flex items-center gap-1">
-                                  {(selCandidate.identitySymbolImageUrl || selCandidate.symbolUrl) ? (
-                                    <img src={selCandidate.identitySymbolImageUrl || selCandidate.symbolUrl} className="h-3.5 w-3.5 object-contain shrink-0" referrerPolicy="no-referrer" alt="symbol" />
-                                  ) : (
-                                    <span>{selCandidate.symbol.split(' ')[0]}</span>
-                                  )}
+                                  <CandidateSymbol
+                                    symbolUrl={selCandidate.symbolUrl}
+                                    identitySymbolImageUrl={selCandidate.identitySymbolImageUrl}
+                                    symbolURL={selCandidate.symbolURL}
+                                    symbolText={selCandidate.symbol}
+                                    className="h-3.5 w-3.5 object-contain shrink-0"
+                                  />
                                   <span>{selCandidate.name}</span>
                                 </span>
                               ) : (

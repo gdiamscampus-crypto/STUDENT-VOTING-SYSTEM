@@ -39,6 +39,8 @@ import {
 } from '../firebase';
 import { hashPassword } from '../utils/hash';
 import ElectionSlips from './ElectionSlips';
+import { CandidatePhoto, CandidateSymbol } from './CandidateMedia';
+import { extractGoogleDriveId, isGoogleDriveUrl, formatToGoogleDriveDirectUrl } from '../utils/googleDrive';
 import {
   LayoutDashboard,
   Calendar,
@@ -343,19 +345,6 @@ export default function AdminPortal({
 
   const [editingCandidateId, setEditingCandidateId] = useState<string | null>(null);
 
-  // Helper to extract File ID from Google Drive public share links
-  const extractGoogleDriveId = (url: string): string | null => {
-    if (!url) return null;
-    const match1 = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-    if (match1 && match1[1]) return match1[1];
-    const match2 = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-    if (match2 && match2[1]) return match2[1];
-    const match3 = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-    if (match3 && match3[1]) return match3[1];
-    if (/^[a-zA-Z0-9_-]{25,45}$/.test(url)) return url;
-    return null;
-  };
-
   const handleSymbolDriveLinkChange = (value: string) => {
     setSymbolDriveLink(value);
     const trimmed = value.trim();
@@ -365,12 +354,12 @@ export default function AdminPortal({
       return;
     }
 
-    const fileIdMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-    const isValidPrefix = trimmed.startsWith('https://drive.google.com/file/d/') || trimmed.startsWith('https://drive.google.com/uc?export=view&id=');
+    const isDrive = isGoogleDriveUrl(trimmed) || trimmed.includes('drive.google.com') || trimmed.includes('googleusercontent.com');
+    const fileId = extractGoogleDriveId(trimmed);
 
-    if (isValidPrefix && fileIdMatch && fileIdMatch[1]) {
-      const fileId = fileIdMatch[1];
-      setSymbolUrl(`https://drive.google.com/uc?export=view&id=${fileId}`);
+    if (isDrive && fileId) {
+      const directUrl = formatToGoogleDriveDirectUrl(trimmed);
+      setSymbolUrl(directUrl);
       setSymbolValidationError(null);
     } else {
       setSymbolUrl('');
@@ -387,12 +376,12 @@ export default function AdminPortal({
       return;
     }
 
-    const fileIdMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-    const isValidPrefix = trimmed.startsWith('https://drive.google.com/file/d/') || trimmed.startsWith('https://drive.google.com/uc?export=view&id=');
+    const isDrive = isGoogleDriveUrl(trimmed) || trimmed.includes('drive.google.com') || trimmed.includes('googleusercontent.com');
+    const fileId = extractGoogleDriveId(trimmed);
 
-    if (isValidPrefix && fileIdMatch && fileIdMatch[1]) {
-      const fileId = fileIdMatch[1];
-      setPhotoUrl(`https://drive.google.com/uc?export=view&id=${fileId}`);
+    if (isDrive && fileId) {
+      const directUrl = formatToGoogleDriveDirectUrl(trimmed);
+      setPhotoUrl(directUrl);
       setPhotoValidationError(null);
     } else {
       setPhotoUrl('');
@@ -705,6 +694,9 @@ export default function AdminPortal({
       return;
     }
 
+    const directPhotoUrl = formatToGoogleDriveDirectUrl(photoUrl);
+    const directSymbolUrl = formatToGoogleDriveDirectUrl(symbolUrl);
+
     const candId = editingCandidateId || `cand_${Date.now()}`;
     const candidateData: Candidate = {
       id: candId,
@@ -713,26 +705,26 @@ export default function AdminPortal({
       grade: candGrade,
       division: candDivision.trim() || 'A',
       rollNumber: candRoll.trim() || '1',
-      symbol: symbolUrl,
+      symbol: directSymbolUrl,
       bio: candBio.trim() || 'No biography details provided.',
       manifesto: candManifesto.trim() || 'No manifesto detailed.',
       avatarSeed: candName.trim().slice(0, 2).toUpperCase(),
       colorTheme: candTheme,
-      photoUrl: photoUrl,
-      symbolUrl: symbolUrl,
+      photoUrl: directPhotoUrl,
+      symbolUrl: directSymbolUrl,
       votesCount: candidates.find(c => c.id === candId)?.votesCount || 0,
       
       candidateId: candId,
       electionId: '',
       candidateName: candName.trim(),
-      candidatePhotoURL: photoUrl,
+      candidatePhotoURL: directPhotoUrl,
       class: candGrade,
-      symbolURL: symbolUrl,
+      symbolURL: directSymbolUrl,
       biography: candBio.trim() || 'No biography details provided.',
       createdAt: new Date().toISOString(),
 
-      identitySymbolImageUrl: symbolUrl,
-      avatarImageUrl: photoUrl
+      identitySymbolImageUrl: directSymbolUrl,
+      avatarImageUrl: directPhotoUrl
     };
 
     if (editingCandidateId) {
@@ -1344,7 +1336,15 @@ export default function AdminPortal({
                     {symbolUrl && !symbolValidationError && (
                       <div className="mt-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center gap-3 animate-fade-in">
                         <div className="h-10 w-10 rounded-lg border border-slate-200 overflow-hidden bg-white shrink-0 flex items-center justify-center p-1 shadow-xs">
-                          <img src={symbolUrl} alt="Symbol Preview" className="h-full w-full object-contain" referrerPolicy="no-referrer" />
+                          <img
+                            src={symbolUrl}
+                            alt="Symbol Preview"
+                            className="h-full w-full object-contain"
+                            referrerPolicy="no-referrer"
+                            onError={() => {
+                              setSymbolValidationError("This Google Drive image is not publicly accessible. Please enable 'Anyone with the link → Viewer'.");
+                            }}
+                          />
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
@@ -1395,7 +1395,15 @@ export default function AdminPortal({
                     {photoUrl && !photoValidationError && (
                       <div className="mt-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center gap-3 animate-fade-in">
                         <div className="h-12 w-12 rounded-full border border-slate-200 overflow-hidden bg-white shrink-0 shadow-xs">
-                          <img src={photoUrl} alt="Avatar Preview" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                          <img
+                            src={photoUrl}
+                            alt="Avatar Preview"
+                            className="h-full w-full object-cover"
+                            referrerPolicy="no-referrer"
+                            onError={() => {
+                              setPhotoValidationError("This Google Drive image is not publicly accessible. Please enable 'Anyone with the link → Viewer'.");
+                            }}
+                          />
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
@@ -1472,20 +1480,22 @@ export default function AdminPortal({
                       <div key={cand.id} className="flex justify-between items-start p-4 bg-slate-50/50 border border-slate-100 hover:border-slate-200 rounded-xl transition-all">
                         <div className="flex gap-3">
                           <div className="h-10 w-10 bg-slate-200 rounded-xl overflow-hidden shrink-0 flex items-center justify-center text-xs font-black text-slate-500">
-                            {cand.photoUrl ? (
-                              <img src={cand.photoUrl} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
-                            ) : (
-                              cand.avatarSeed
-                            )}
+                            <CandidatePhoto
+                              photoUrl={cand.photoUrl}
+                              avatarImageUrl={cand.avatarImageUrl}
+                              candidatePhotoURL={cand.candidatePhotoURL}
+                              fallbackSeed={cand.avatarSeed || cand.name}
+                            />
                           </div>
                           <div>
                             <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
                               <span>{cand.name}</span>
-                              {(cand.identitySymbolImageUrl || cand.symbolUrl) ? (
-                                <img src={cand.identitySymbolImageUrl || cand.symbolUrl} className="h-4 w-4 object-contain shrink-0" referrerPolicy="no-referrer" alt="symbol" />
-                              ) : (
-                                <span className="text-[10px]">{cand.symbol}</span>
-                              )}
+                              <CandidateSymbol
+                                symbolUrl={cand.symbolUrl}
+                                identitySymbolImageUrl={cand.identitySymbolImageUrl}
+                                symbolURL={cand.symbolURL}
+                                symbolText={cand.symbol}
+                              />
                             </span>
                             <p className="text-[10px] font-bold text-indigo-700 mt-0.5">{postName}</p>
                             <p className="text-[9px] text-slate-400 font-mono mt-0.5">{cand.grade} {cand.division} • Roll: {cand.rollNumber}</p>
@@ -1983,11 +1993,12 @@ export default function AdminPortal({
                           <div key={cand.id} className="space-y-1.5 text-xs">
                             <div className="flex justify-between items-center text-slate-700">
                               <span className="font-semibold flex items-center gap-1.5">
-                                {(cand.identitySymbolImageUrl || cand.symbolUrl) ? (
-                                  <img src={cand.identitySymbolImageUrl || cand.symbolUrl} className="h-4 w-4 object-contain shrink-0" referrerPolicy="no-referrer" alt="symbol" />
-                                ) : (
-                                  <span>{cand.symbol}</span>
-                                )}
+                                <CandidateSymbol
+                                  symbolUrl={cand.symbolUrl}
+                                  identitySymbolImageUrl={cand.identitySymbolImageUrl}
+                                  symbolURL={cand.symbolURL}
+                                  symbolText={cand.symbol}
+                                />
                                 <span>{cand.name}</span>
                               </span>
                               <span className="font-mono font-bold text-slate-800">{tally} votes ({percent}%)</span>
@@ -2066,11 +2077,24 @@ export default function AdminPortal({
 
                       {hasVotes ? (
                         <div className="flex gap-3.5 items-center p-3 bg-emerald-50/40 border border-emerald-100 rounded-2xl">
-                          <div className="h-11 w-11 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center font-black shrink-0 text-xl">
-                            🏆
+                          <div className="h-11 w-11 bg-emerald-100 text-emerald-600 rounded-xl overflow-hidden shrink-0 flex items-center justify-center font-black">
+                            <CandidatePhoto
+                              photoUrl={winner.photoUrl}
+                              avatarImageUrl={winner.avatarImageUrl}
+                              candidatePhotoURL={winner.candidatePhotoURL}
+                              fallbackSeed={winner.avatarSeed || winner.name}
+                            />
                           </div>
-                          <div className="space-y-0.5">
-                            <span className="font-bold text-slate-800 text-xs">{winner.name}</span>
+                          <div className="space-y-0.5 min-w-0 flex-1">
+                            <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                              <span>{winner.name}</span>
+                              <CandidateSymbol
+                                symbolUrl={winner.symbolUrl}
+                                identitySymbolImageUrl={winner.identitySymbolImageUrl}
+                                symbolURL={winner.symbolURL}
+                                symbolText={winner.symbol}
+                              />
+                            </span>
                             <p className="text-[10px] text-slate-500">{winner.grade} {winner.division} • {winner.votesCount} votes logged</p>
                           </div>
                         </div>
