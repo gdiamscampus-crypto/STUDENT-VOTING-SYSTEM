@@ -334,23 +334,12 @@ export default function AdminPortal({
   // Photo drive validation
   const [photoDriveLink, setPhotoDriveLink] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
-  const [isPhotoLinkValid, setIsPhotoLinkValid] = useState<boolean | null>(null);
-  const [isValidatingPhoto, setIsValidatingPhoto] = useState(false);
   const [photoValidationError, setPhotoValidationError] = useState<string | null>(null);
 
-  // Photo automatic upload states
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [googleToken, setGoogleToken] = useState<string | null>(null);
-  const photoFileInputRef = useRef<HTMLInputElement>(null);
-
-  // Identity Symbol automatic upload states
+  // Identity Symbol drive validation
+  const [symbolDriveLink, setSymbolDriveLink] = useState('');
   const [symbolUrl, setSymbolUrl] = useState('');
-  const [isUploadingSymbol, setIsUploadingSymbol] = useState(false);
-  const [uploadSymbolProgress, setUploadSymbolProgress] = useState(0);
-  const [uploadSymbolError, setUploadSymbolError] = useState<string | null>(null);
-  const symbolFileInputRef = useRef<HTMLInputElement>(null);
+  const [symbolValidationError, setSymbolValidationError] = useState<string | null>(null);
 
   const [editingCandidateId, setEditingCandidateId] = useState<string | null>(null);
 
@@ -365,6 +354,50 @@ export default function AdminPortal({
     if (match3 && match3[1]) return match3[1];
     if (/^[a-zA-Z0-9_-]{25,45}$/.test(url)) return url;
     return null;
+  };
+
+  const handleSymbolDriveLinkChange = (value: string) => {
+    setSymbolDriveLink(value);
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setSymbolUrl('');
+      setSymbolValidationError(null);
+      return;
+    }
+
+    const fileIdMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    const isValidPrefix = trimmed.startsWith('https://drive.google.com/file/d/') || trimmed.startsWith('https://drive.google.com/uc?export=view&id=');
+
+    if (isValidPrefix && fileIdMatch && fileIdMatch[1]) {
+      const fileId = fileIdMatch[1];
+      setSymbolUrl(`https://drive.google.com/uc?export=view&id=${fileId}`);
+      setSymbolValidationError(null);
+    } else {
+      setSymbolUrl('');
+      setSymbolValidationError("Invalid Google Drive public image link.");
+    }
+  };
+
+  const handlePhotoDriveLinkChange = (value: string) => {
+    setPhotoDriveLink(value);
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setPhotoUrl('');
+      setPhotoValidationError(null);
+      return;
+    }
+
+    const fileIdMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    const isValidPrefix = trimmed.startsWith('https://drive.google.com/file/d/') || trimmed.startsWith('https://drive.google.com/uc?export=view&id=');
+
+    if (isValidPrefix && fileIdMatch && fileIdMatch[1]) {
+      const fileId = fileIdMatch[1];
+      setPhotoUrl(`https://drive.google.com/uc?export=view&id=${fileId}`);
+      setPhotoValidationError(null);
+    } else {
+      setPhotoUrl('');
+      setPhotoValidationError("Invalid Google Drive public image link.");
+    }
   };
 
   // Dynamic helper to find folder by name in user's Google Drive
@@ -516,251 +549,6 @@ export default function AdminPortal({
     }
   };
 
-  // Triggers device file picker / Google OAuth popup
-  const handleUploadClick = async () => {
-    setUploadError(null);
-    let token = googleToken;
-    if (!token) {
-      try {
-        setIsUploading(true);
-        const auth = getAuth();
-        const provider = new GoogleAuthProvider();
-        provider.addScope('https://www.googleapis.com/auth/drive.file');
-        const result = await signInWithPopup(auth, provider);
-        const credential = GoogleAuthProvider.credentialFromResult(result);
-        if (credential?.accessToken) {
-          token = credential.accessToken;
-          setGoogleToken(token);
-        } else {
-          throw new Error("Did not receive Google Drive Access Token");
-        }
-      } catch (err: any) {
-        console.error("Google Auth popup failed:", err);
-        if (err?.code === 'auth/popup-closed-by-user') {
-          setUploadError("The login popup was closed before completion. Please keep the window open to authorize Google Drive access.");
-        } else if (err?.code === 'auth/cancelled-popup-request') {
-          setUploadError("Only one authorization popup can be active at a time. Please wait or refresh.");
-        } else {
-          setUploadError("Image upload failed. Please try again.");
-        }
-        playSystemSound('warning_sound');
-        setIsUploading(false);
-        return;
-      } finally {
-        setIsUploading(false);
-      }
-    }
-
-    if (token) {
-      photoFileInputRef.current?.click();
-    }
-  };
-
-  // Handles actual file selection and automatic upload to Google Drive
-  const handlePhotoFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Validate size: 5MB
-    if (file.size > 5 * 1024 * 1024) {
-      setUploadError("File size exceeds 5 MB maximum limit.");
-      playSystemSound('warning_sound');
-      return;
-    }
-
-    // Validate type
-    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (!validTypes.includes(file.type)) {
-      setUploadError("Invalid file type. Accept only JPG, JPEG, PNG, and WEBP files.");
-      playSystemSound('warning_sound');
-      return;
-    }
-
-    let token = googleToken;
-    if (!token) {
-      setUploadError("Image upload failed. Please try again.");
-      return;
-    }
-
-    setIsUploading(true);
-    setUploadProgress(0);
-    setUploadError(null);
-
-    try {
-      // 1. Get or create 'Candidate Photos' folder
-      const folderId = await getOrCreateFolderIdByName(token, 'Candidate Photos');
-
-      // 2. Upload file to that folder
-      const fileId = await uploadPhotoToDrive(token, file, folderId, (percent) => {
-        setUploadProgress(percent);
-      });
-
-      // 3. Make anyone with link viewer
-      await shareFileOnDrive(token, fileId);
-
-      // 4. Generate public direct URL
-      const directUrl = `https://drive.google.com/uc?export=view&id=${fileId}`;
-      setPhotoUrl(directUrl);
-      setIsPhotoLinkValid(true);
-      playSystemSound('vote_success');
-    } catch (err) {
-      console.error("Automatic upload failed:", err);
-      setUploadError("Image upload failed. Please try again.");
-      playSystemSound('warning_sound');
-    } finally {
-      setIsUploading(false);
-      if (photoFileInputRef.current) {
-        photoFileInputRef.current.value = '';
-      }
-    }
-  };
-
-  // Deletes the uploaded file from Google Drive and clears state
-  const handleDeletePhoto = async () => {
-    if (!photoUrl) return;
-    const fileId = extractGoogleDriveId(photoUrl);
-
-    setPhotoUrl('');
-    setUploadError(null);
-    setIsPhotoLinkValid(null);
-
-    if (fileId && googleToken) {
-      try {
-        await deleteFileFromDrive(googleToken, fileId);
-      } catch (err) {
-        console.error("Failed to delete from Drive:", err);
-      }
-    }
-  };
-
-  // Triggers device file picker / Google OAuth popup for Identity Symbol
-  const handleUploadSymbolClick = async () => {
-    setUploadSymbolError(null);
-    let token = googleToken;
-    if (!token) {
-      try {
-        setIsUploadingSymbol(true);
-        const auth = getAuth();
-        const provider = new GoogleAuthProvider();
-        provider.addScope('https://www.googleapis.com/auth/drive.file');
-        const result = await signInWithPopup(auth, provider);
-        const credential = GoogleAuthProvider.credentialFromResult(result);
-        if (credential?.accessToken) {
-          token = credential.accessToken;
-          setGoogleToken(token);
-        } else {
-          throw new Error("Did not receive Google Drive Access Token");
-        }
-      } catch (err: any) {
-        console.error("Google Auth popup failed:", err);
-        if (err?.code === 'auth/popup-closed-by-user') {
-          setUploadSymbolError("The login popup was closed before completion. Please keep the window open to authorize Google Drive access.");
-        } else if (err?.code === 'auth/cancelled-popup-request') {
-          setUploadSymbolError("Only one authorization popup can be active at a time. Please wait or refresh.");
-        } else {
-          setUploadSymbolError("Image upload failed. Please try again.");
-        }
-        playSystemSound('warning_sound');
-        setIsUploadingSymbol(false);
-        return;
-      } finally {
-        setIsUploadingSymbol(false);
-      }
-    }
-
-    if (token) {
-      symbolFileInputRef.current?.click();
-    }
-  };
-
-  // Handles actual file selection and automatic upload to Google Drive for Identity Symbol
-  const handleSymbolFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Validate size: 2MB
-    if (file.size > 2 * 1024 * 1024) {
-      setUploadSymbolError("File size exceeds 2 MB maximum limit.");
-      playSystemSound('warning_sound');
-      return;
-    }
-
-    // Validate type: PNG, SVG, WEBP, JPG, JPEG
-    const validTypes = ['image/png', 'image/svg+xml', 'image/webp', 'image/jpeg', 'image/jpg'];
-    if (!validTypes.includes(file.type)) {
-      setUploadSymbolError("Invalid file type. Accept only PNG, SVG, WEBP, JPG, and JPEG.");
-      playSystemSound('warning_sound');
-      return;
-    }
-
-    let token = googleToken;
-    if (!token) {
-      setUploadSymbolError("Image upload failed. Please try again.");
-      return;
-    }
-
-    setIsUploadingSymbol(true);
-    setUploadSymbolProgress(0);
-    setUploadSymbolError(null);
-
-    try {
-      // 1. Get or create 'Election Identity Symbols' folder
-      const folderId = await getOrCreateFolderIdByName(token, 'Election Identity Symbols');
-
-      // 2. Upload file to that folder
-      const fileId = await uploadPhotoToDrive(token, file, folderId, (percent) => {
-        setUploadSymbolProgress(percent);
-      });
-
-      // 3. Make anyone with link viewer
-      await shareFileOnDrive(token, fileId);
-
-      // 4. Generate public direct URL
-      const directUrl = `https://drive.google.com/uc?export=view&id=${fileId}`;
-      setSymbolUrl(directUrl);
-      playSystemSound('vote_success');
-    } catch (err) {
-      console.error("Automatic upload failed:", err);
-      setUploadSymbolError("Image upload failed. Please try again.");
-      playSystemSound('warning_sound');
-    } finally {
-      setIsUploadingSymbol(false);
-      if (symbolFileInputRef.current) {
-        symbolFileInputRef.current.value = '';
-      }
-    }
-  };
-
-  // Deletes the uploaded symbol from Google Drive and clears state
-  const handleDeleteSymbol = async () => {
-    if (!symbolUrl) return;
-    const fileId = extractGoogleDriveId(symbolUrl);
-
-    setSymbolUrl('');
-    setUploadSymbolError(null);
-
-    if (fileId && googleToken) {
-      try {
-        await deleteFileFromDrive(googleToken, fileId);
-      } catch (err) {
-        console.error("Failed to delete from Drive:", err);
-      }
-    }
-  };
-
-  useEffect(() => {
-    // Retain for backward compatibility or direct link support
-    if (!photoDriveLink.trim()) return;
-    if (photoDriveLink.includes('export=view') || photoDriveLink.includes('drive.google.com/uc')) {
-      return;
-    }
-    const fileId = extractGoogleDriveId(photoDriveLink);
-    if (!fileId) return;
-    const directUrl = `https://drive.google.com/uc?export=view&id=${fileId}`;
-    setPhotoUrl(directUrl);
-    setIsPhotoLinkValid(true);
-  }, [photoDriveLink]);
-
   // Sync default position if positions load later
   useEffect(() => {
     if (positions.length > 0 && !candPositionId) {
@@ -900,6 +688,23 @@ export default function AdminPortal({
     e.preventDefault();
     if (!candName.trim() || !candPositionId) return;
 
+    let hasError = false;
+
+    if (!symbolUrl) {
+      setSymbolValidationError("Invalid Google Drive public image link.");
+      hasError = true;
+    }
+
+    if (!photoUrl) {
+      setPhotoValidationError("Invalid Google Drive public image link.");
+      hasError = true;
+    }
+
+    if (hasError || symbolValidationError || photoValidationError) {
+      playSystemSound('warning_sound');
+      return;
+    }
+
     const candId = editingCandidateId || `cand_${Date.now()}`;
     const candidateData: Candidate = {
       id: candId,
@@ -908,26 +713,26 @@ export default function AdminPortal({
       grade: candGrade,
       division: candDivision.trim() || 'A',
       rollNumber: candRoll.trim() || '1',
-      symbol: symbolUrl || '⭐',
+      symbol: symbolUrl,
       bio: candBio.trim() || 'No biography details provided.',
       manifesto: candManifesto.trim() || 'No manifesto detailed.',
       avatarSeed: candName.trim().slice(0, 2).toUpperCase(),
       colorTheme: candTheme,
-      photoUrl: photoUrl || '',
-      symbolUrl: symbolUrl || '',
+      photoUrl: photoUrl,
+      symbolUrl: symbolUrl,
       votesCount: candidates.find(c => c.id === candId)?.votesCount || 0,
       
       candidateId: candId,
       electionId: '',
       candidateName: candName.trim(),
-      candidatePhotoURL: photoUrl || '',
+      candidatePhotoURL: photoUrl,
       class: candGrade,
-      symbolURL: symbolUrl || '',
+      symbolURL: symbolUrl,
       biography: candBio.trim() || 'No biography details provided.',
       createdAt: new Date().toISOString(),
 
-      identitySymbolImageUrl: symbolUrl || '',
-      avatarImageUrl: photoUrl || ''
+      identitySymbolImageUrl: symbolUrl,
+      avatarImageUrl: photoUrl
     };
 
     if (editingCandidateId) {
@@ -942,10 +747,11 @@ export default function AdminPortal({
     setCandBio('');
     setCandManifesto('');
     setPhotoUrl('');
-    setSymbolUrl('');
     setPhotoDriveLink('');
     setPhotoValidationError(null);
-    setIsPhotoLinkValid(null);
+    setSymbolUrl('');
+    setSymbolDriveLink('');
+    setSymbolValidationError(null);
     playSystemSound('candidate_added_sound');
   };
 
@@ -956,13 +762,26 @@ export default function AdminPortal({
     setCandGrade(candidate.grade);
     setCandDivision(candidate.division);
     setCandRoll(candidate.rollNumber);
-    setCandSymbol(candidate.symbol);
     setCandBio(candidate.bio);
     setCandManifesto(candidate.manifesto);
     setCandTheme(candidate.colorTheme);
-    setPhotoUrl(candidate.avatarImageUrl || candidate.photoUrl || '');
-    setSymbolUrl(candidate.identitySymbolImageUrl || candidate.symbolUrl || '');
-    setPhotoDriveLink(candidate.photoUrl ? `https://drive.google.com/file/d/${extractGoogleDriveId(candidate.photoUrl)}` : '');
+
+    const activePhoto = candidate.avatarImageUrl || candidate.photoUrl || candidate.candidatePhotoURL || '';
+    const photoId = extractGoogleDriveId(activePhoto);
+    const photoDirect = photoId ? `https://drive.google.com/uc?export=view&id=${photoId}` : '';
+    const photoLink = photoId ? `https://drive.google.com/file/d/${photoId}/view?usp=sharing` : (activePhoto.startsWith('https://') ? activePhoto : '');
+    setPhotoUrl(photoDirect);
+    setPhotoDriveLink(photoLink);
+    setPhotoValidationError(photoDirect ? null : (activePhoto ? "Invalid Google Drive public image link." : null));
+
+    const activeSymbol = candidate.identitySymbolImageUrl || candidate.symbolUrl || candidate.symbol || '';
+    const symId = extractGoogleDriveId(activeSymbol);
+    const symDirect = symId ? `https://drive.google.com/uc?export=view&id=${symId}` : '';
+    const symLink = symId ? `https://drive.google.com/file/d/${symId}/view?usp=sharing` : (activeSymbol.startsWith('https://') ? activeSymbol : '');
+    setSymbolUrl(symDirect);
+    setSymbolDriveLink(symLink);
+    setSymbolValidationError(symDirect ? null : (activeSymbol ? "Invalid Google Drive public image link." : null));
+
     setActiveModule('candidate_management');
   };
 
@@ -1501,81 +1320,41 @@ export default function AdminPortal({
                     </div>
                   </div>
 
-                  {/* Character Symbol - Replaced with Automatic Upload */}
+                  {/* Identity Symbol Image (Public Google Drive Link) */}
                   <div className="space-y-1.5">
-                    <label className="font-bold text-slate-600">Identity Symbol (Google Drive Upload)</label>
-                    
+                    <label className="font-bold text-slate-600">Identity Symbol Image (Public Google Drive Link)</label>
                     <input
-                      type="file"
-                      ref={symbolFileInputRef}
-                      onChange={handleSymbolFileChange}
-                      accept="image/png,image/svg+xml,image/webp,image/jpeg,image/jpg"
-                      className="hidden"
+                      type="text"
+                      required
+                      placeholder="Paste Public Google Drive Image Link"
+                      value={symbolDriveLink}
+                      onChange={(e) => handleSymbolDriveLinkChange(e.target.value)}
+                      className={`w-full px-3.5 py-2.5 rounded-xl border ${
+                        symbolValidationError ? 'border-rose-400 focus:ring-rose-500/20' : 'border-slate-200 focus:ring-indigo-500/20 focus:border-indigo-500'
+                      } text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 text-xs transition-all`}
                     />
 
-                    <div className="flex items-center gap-4 p-3 bg-slate-50/50 rounded-xl border border-dashed border-slate-200 animate-fade-in min-h-[90px]">
-                      {symbolUrl ? (
-                        <div className="relative h-12 w-12 rounded-xl overflow-hidden border-2 border-indigo-500 shrink-0 shadow-sm bg-slate-100 flex items-center justify-center p-1">
+                    {symbolValidationError && (
+                      <p className="text-[10px] text-rose-500 font-bold flex items-center gap-1 mt-1">
+                        <AlertTriangle className="h-3 w-3 shrink-0" />
+                        <span>{symbolValidationError}</span>
+                      </p>
+                    )}
+
+                    {symbolUrl && !symbolValidationError && (
+                      <div className="mt-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center gap-3 animate-fade-in">
+                        <div className="h-10 w-10 rounded-lg border border-slate-200 overflow-hidden bg-white shrink-0 flex items-center justify-center p-1 shadow-xs">
                           <img src={symbolUrl} alt="Symbol Preview" className="h-full w-full object-contain" referrerPolicy="no-referrer" />
                         </div>
-                      ) : (
-                        <div className="h-12 w-12 rounded-xl border-2 border-dashed border-slate-200 shrink-0 flex items-center justify-center bg-slate-100 text-slate-400">
-                          <ImageIcon className="h-5 w-5" />
-                        </div>
-                      )}
-
-                      <div className="flex flex-col gap-1 flex-1 min-w-0">
-                        <div className="flex flex-wrap gap-2">
-                          {!symbolUrl ? (
-                            <button
-                              type="button"
-                              disabled={isUploadingSymbol}
-                              onClick={handleUploadSymbolClick}
-                              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                            >
-                              ✨ Upload Identity Symbol
-                            </button>
-                          ) : (
-                            <>
-                              <button
-                                type="button"
-                                disabled={isUploadingSymbol}
-                                onClick={handleUploadSymbolClick}
-                                className="px-2.5 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                              >
-                                Replace
-                              </button>
-                              <button
-                                type="button"
-                                disabled={isUploadingSymbol}
-                                onClick={handleDeleteSymbol}
-                                className="px-2.5 py-1.5 bg-rose-50 border border-rose-100 text-rose-600 rounded-lg text-xs font-bold hover:bg-rose-100 transition-colors cursor-pointer disabled:opacity-50"
-                              >
-                                Delete
-                              </button>
-                            </>
-                          )}
-                        </div>
-
-                        <p className="text-[10px] text-slate-400 font-medium leading-normal">
-                          PNG, SVG, WEBP, JPG, JPEG. Max 2MB.
-                        </p>
-
-                        {isUploadingSymbol && (
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            <Loader2 className="h-3 w-3 text-indigo-600 animate-spin" />
-                            <span className="text-[10px] text-slate-500 font-bold">Uploading... {uploadSymbolProgress}%</span>
-                          </div>
-                        )}
-
-                        {uploadSymbolError && (
-                          <p className="text-[10px] text-rose-500 font-bold flex items-center gap-1 mt-0.5">
-                            <AlertTriangle className="h-3 w-3 shrink-0" />
-                            <span className="truncate">{uploadSymbolError}</span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
+                            <CheckCircle className="h-3 w-3 shrink-0" />
+                            Valid Google Drive Image
                           </p>
-                        )}
+                          <p className="text-[9px] text-slate-400 font-mono truncate">{symbolUrl}</p>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
 
                   {/* Candidate Visual Theme */}
@@ -1592,89 +1371,41 @@ export default function AdminPortal({
                     </select>
                   </div>
 
-                  {/* Public Google Drive Photo Link - Replaced with Automatic Upload */}
-                  <div className="md:col-span-2 space-y-2">
-                    <label className="font-bold text-slate-600">Candidate Avatar Image (Google Drive Upload)</label>
-                    
+                  {/* Candidate Avatar Image (Public Google Drive Link) */}
+                  <div className="md:col-span-2 space-y-1.5">
+                    <label className="font-bold text-slate-600">Candidate Avatar Image (Public Google Drive Link)</label>
                     <input
-                      type="file"
-                      ref={photoFileInputRef}
-                      onChange={handlePhotoFileChange}
-                      accept="image/jpeg,image/jpg,image/png,image/webp"
-                      className="hidden"
+                      type="text"
+                      required
+                      placeholder="Paste Public Google Drive Image Link"
+                      value={photoDriveLink}
+                      onChange={(e) => handlePhotoDriveLinkChange(e.target.value)}
+                      className={`w-full px-3.5 py-2.5 rounded-xl border ${
+                        photoValidationError ? 'border-rose-400 focus:ring-rose-500/20' : 'border-slate-200 focus:ring-indigo-500/20 focus:border-indigo-500'
+                      } text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 text-xs transition-all`}
                     />
 
-                    <div className="flex items-center gap-4 p-3 bg-slate-50/50 rounded-xl border border-dashed border-slate-200 animate-fade-in">
-                      {photoUrl ? (
-                        <div className="relative h-16 w-16 rounded-full overflow-hidden border-2 border-indigo-500 shrink-0 shadow-sm bg-slate-100">
-                          <img src={photoUrl} alt="Preview" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                    {photoValidationError && (
+                      <p className="text-[10px] text-rose-500 font-bold flex items-center gap-1 mt-1">
+                        <AlertTriangle className="h-3 w-3 shrink-0" />
+                        <span>{photoValidationError}</span>
+                      </p>
+                    )}
+
+                    {photoUrl && !photoValidationError && (
+                      <div className="mt-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center gap-3 animate-fade-in">
+                        <div className="h-12 w-12 rounded-full border border-slate-200 overflow-hidden bg-white shrink-0 shadow-xs">
+                          <img src={photoUrl} alt="Avatar Preview" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
                         </div>
-                      ) : (
-                        <div className="h-16 w-16 rounded-full border-2 border-dashed border-slate-200 shrink-0 flex items-center justify-center bg-slate-100 text-slate-400">
-                          <ImageIcon className="h-6 w-6" />
-                        </div>
-                      )}
-
-                      <div className="flex flex-col gap-1.5 flex-1 min-w-0">
-                        <div className="flex flex-wrap gap-2">
-                          {!photoUrl ? (
-                            <button
-                              type="button"
-                              disabled={isUploading}
-                              onClick={handleUploadClick}
-                              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                            >
-                              📷 Upload Candidate Photo
-                            </button>
-                          ) : (
-                            <>
-                              <button
-                                type="button"
-                                disabled={isUploading}
-                                onClick={handleUploadClick}
-                                className="px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                              >
-                                Replace Photo
-                              </button>
-                              <button
-                                type="button"
-                                disabled={isUploading}
-                                onClick={handleDeletePhoto}
-                                className="px-3 py-1.5 bg-rose-50 border border-rose-100 text-rose-600 rounded-lg text-xs font-bold hover:bg-rose-100 transition-colors cursor-pointer disabled:opacity-50"
-                              >
-                                Delete Photo
-                              </button>
-                            </>
-                          )}
-                        </div>
-
-                        {/* File requirements details */}
-                        <p className="text-[10px] text-slate-400 font-medium leading-normal">
-                          Supports JPG, JPEG, PNG, WEBP. Max size: 5MB.
-                        </p>
-
-                        {isUploading && (
-                          <div className="flex items-center gap-2 mt-1">
-                            <Loader2 className="h-3.5 w-3.5 text-indigo-600 animate-spin" />
-                            <span className="text-[10px] text-slate-500 font-bold">Uploading... {uploadProgress}%</span>
-                          </div>
-                        )}
-
-                        {uploadError && (
-                          <p className="text-[10px] text-rose-500 font-bold flex items-center gap-1 mt-1">
-                            <AlertTriangle className="h-3.5 w-3.5" />
-                            {uploadError}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
+                            <CheckCircle className="h-3 w-3 shrink-0" />
+                            Valid Google Drive Image
                           </p>
-                        )}
-
-                        {photoUrl && !isUploading && !uploadError && (
-                          <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 mt-1 animate-fade-in">
-                            <CheckCircle className="h-3.5 w-3.5" />
-                            Uploaded & configured successfully to Google Drive.
-                          </p>
-                        )}
+                          <p className="text-[9px] text-slate-400 font-mono truncate">{photoUrl}</p>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
 
                   {/* Biography */}
@@ -1721,8 +1452,7 @@ export default function AdminPortal({
                     )}
                     <button
                       type="submit"
-                      disabled={isUploading}
-                      className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-lg hover:shadow-indigo-500/10 transition-colors cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-lg hover:shadow-indigo-500/10 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
                     >
                       {editingCandidateId ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
                       <span>{editingCandidateId ? 'Save Profile Changes' : 'Register Candidate Profile'}</span>
