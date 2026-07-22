@@ -42,17 +42,25 @@ export const CandidatePhoto: React.FC<CandidatePhotoProps> = ({
     );
   }
 
+  const errorMessage = "Unable to load image. Please make sure the Google Drive file is shared as 'Anyone with the link'.";
+
   // Default fallback avatar when no photo or on error
   if (themeGradient) {
     return (
-      <div className={`h-full w-full bg-gradient-to-tr ${themeGradient} text-white font-bold flex flex-col items-center justify-center text-xs overflow-hidden`}>
+      <div
+        className={`h-full w-full bg-gradient-to-tr ${themeGradient} text-white font-bold flex flex-col items-center justify-center text-xs overflow-hidden`}
+        title={hasError ? errorMessage : undefined}
+      >
         <span className="text-base font-black uppercase font-mono">{fallbackSeed || 'CD'}</span>
       </div>
     );
   }
 
   return (
-    <div className="h-full w-full bg-slate-100 text-slate-400 flex items-center justify-center">
+    <div
+      className="h-full w-full bg-slate-100 text-slate-400 flex items-center justify-center"
+      title={hasError ? errorMessage : undefined}
+    >
       {fallbackSeed ? (
         <span className="font-bold text-xs uppercase font-mono text-slate-500">
           {fallbackSeed.slice(0, 2)}
@@ -106,9 +114,13 @@ export const CandidateSymbol: React.FC<CandidateSymbolProps> = ({
 
   // Default fallback symbol when no symbol image or on error
   const displayChar = fallbackSymbol || (symbolText && !symbolText.startsWith('http') ? symbolText.split(' ')[0] : '⭐');
+  const errorMessage = "Unable to load image. Please make sure the Google Drive file is shared as 'Anyone with the link'.";
 
   return (
-    <span className="inline-flex items-center justify-center text-xs shrink-0">
+    <span
+      className="inline-flex items-center justify-center text-xs shrink-0"
+      title={hasError ? errorMessage : undefined}
+    >
       {displayChar}
     </span>
   );

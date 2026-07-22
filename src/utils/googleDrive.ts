@@ -8,12 +8,24 @@
 export function extractGoogleDriveId(url: string | undefined | null): string | null {
   if (!url) return null;
   const trimmed = url.trim();
+  
+  // 1. Match /file/d/FILE_ID
   const fileDMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
   if (fileDMatch && fileDMatch[1]) return fileDMatch[1];
+  
+  // 2. Match open?id=FILE_ID, uc?id=FILE_ID, ?export=view&id=FILE_ID, etc.
   const idMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
   if (idMatch && idMatch[1]) return idMatch[1];
+  
+  // 3. Match googleusercontent.com/d/FILE_ID
   const lh3Match = trimmed.match(/googleusercontent\.com\/d\/([a-zA-Z0-9_-]+)/);
   if (lh3Match && lh3Match[1]) return lh3Match[1];
+
+  // 4. Raw file ID check (alphanumeric, 20-60 chars, no slashes or colons)
+  if (!trimmed.includes('/') && !trimmed.includes(':') && /^[a-zA-Z0-9_-]{20,60}$/.test(trimmed)) {
+    return trimmed;
+  }
+  
   return null;
 }
 

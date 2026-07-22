@@ -35,8 +35,10 @@ import {
   collection,
   onSnapshot,
   handleFirestoreError,
-  OperationType
+  OperationType,
+  storage
 } from '../firebase';
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { hashPassword } from '../utils/hash';
 import ElectionSlips from './ElectionSlips';
 import { CandidatePhoto, CandidateSymbol } from './CandidateMedia';
@@ -333,59 +335,344 @@ export default function AdminPortal({
   const [candManifesto, setCandManifesto] = useState('');
   const [candTheme, setCandTheme] = useState('indigo');
 
-  // Photo drive validation
-  const [photoDriveLink, setPhotoDriveLink] = useState('');
-  const [photoUrl, setPhotoUrl] = useState('');
-  const [photoValidationError, setPhotoValidationError] = useState<string | null>(null);
+  // Candidate Form ID state for storage path mapping
+  const [formTempCandidateId, setFormTempCandidateId] = useState(() => `cand_${Date.now()}`);
 
-  // Identity Symbol drive validation
-  const [symbolDriveLink, setSymbolDriveLink] = useState('');
+  // Candidate Avatar Image state (Firebase Storage)
+  const [avatarImageUrl, setAvatarImageUrl] = useState('');
+  const [photoUrl, setPhotoUrl] = useState('');
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [avatarUploadProgress, setAvatarUploadProgress] = useState(0);
+  const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
+  const [avatarUploadSuccess, setAvatarUploadSuccess] = useState<string | null>(null);
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Identity Symbol Image state (Firebase Storage)
+  const [identitySymbolImageUrl, setIdentitySymbolImageUrl] = useState('');
   const [symbolUrl, setSymbolUrl] = useState('');
-  const [symbolValidationError, setSymbolValidationError] = useState<string | null>(null);
+  const [isUploadingSymbol, setIsUploadingSymbol] = useState(false);
+  const [symbolUploadProgress, setSymbolUploadProgress] = useState(0);
+  const [symbolUploadError, setSymbolUploadError] = useState<string | null>(null);
+  const [symbolUploadSuccess, setSymbolUploadSuccess] = useState<string | null>(null);
+  const symbolFileInputRef = useRef<HTMLInputElement>(null);
 
   const [editingCandidateId, setEditingCandidateId] = useState<string | null>(null);
 
-  const handleSymbolDriveLinkChange = (value: string) => {
-    setSymbolDriveLink(value);
-    const trimmed = value.trim();
-    if (!trimmed) {
-      setSymbolUrl('');
-      setSymbolValidationError(null);
-      return;
-    }
+  // Image Compression & Base64 Data URL Helper
+  const compressAndConvertToDataUrl = (file: File, maxDimension = 500, quality = 0.85): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const resultStr = e.target?.result as string;
+        if (!resultStr) {
+          reject(new Error('Failed to read image file.'));
+          return;
+        }
 
-    const isDrive = isGoogleDriveUrl(trimmed) || trimmed.includes('drive.google.com') || trimmed.includes('googleusercontent.com');
-    const fileId = extractGoogleDriveId(trimmed);
+        const img = new Image();
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
 
-    if (isDrive && fileId) {
-      const directUrl = formatToGoogleDriveDirectUrl(trimmed);
-      setSymbolUrl(directUrl);
-      setSymbolValidationError(null);
-    } else {
-      setSymbolUrl('');
-      setSymbolValidationError("Invalid Google Drive public image link.");
+          if (width > maxDimension || height > maxDimension) {
+            if (width > height) {
+              height = Math.round((height * maxDimension) / width);
+              width = maxDimension;
+            } else {
+              width = Math.round((width * maxDimension) / height);
+              height = maxDimension;
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(resultStr);
+            return;
+          }
+
+          ctx.drawImage(img, 0, 0, width, height);
+          const isPng = file.type === 'image/png' || file.type === 'image/svg+xml';
+          const format = isPng ? 'image/png' : 'image/jpeg';
+          try {
+            const dataUrl = canvas.toDataURL(format, quality);
+            resolve(dataUrl);
+          } catch (canvasErr) {
+            console.warn('Canvas conversion warning, using raw data URL:', canvasErr);
+            resolve(resultStr);
+          }
+        };
+        img.onerror = () => {
+          resolve(resultStr);
+        };
+        img.src = resultStr;
+      };
+      reader.onerror = () => reject(reader.error || new Error('Failed to read file.'));
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Firebase Storage Upload Helper with Automatic Resilient Fallback
+  const uploadFileToFirebaseStorage = async (
+    storagePath: string,
+    file: File,
+    onProgress: (pct: number) => void
+  ): Promise<string> => {
+    try {
+      // Attempt Firebase Storage Resumable Upload with a 3.5s connection window
+      const downloadUrl = await new Promise<string>((resolve, reject) => {
+        let isSettled = false;
+        let timerId: NodeJS.Timeout | null = null;
+
+        const storageRef = ref(storage, storagePath);
+        const uploadTask = uploadBytesResumable(storageRef, file);
+
+        const resetTimer = (ms = 3500) => {
+          if (timerId) clearTimeout(timerId);
+          timerId = setTimeout(() => {
+            if (!isSettled) {
+              isSettled = true;
+              try {
+                uploadTask.cancel();
+              } catch (e) {
+                console.error('Error cancelling task on timeout:', e);
+              }
+              reject(new Error('Firebase Storage connection timed out.'));
+            }
+          }, ms);
+        };
+
+        resetTimer(3500);
+
+        uploadTask.on(
+          'state_changed',
+          (snapshot) => {
+            if (isSettled) return;
+            resetTimer(10000); // Once progress starts, allow up to 10s per chunk
+            if (snapshot.totalBytes > 0) {
+              const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+              onProgress(pct);
+            }
+          },
+          (error) => {
+            if (isSettled) return;
+            isSettled = true;
+            if (timerId) clearTimeout(timerId);
+            console.warn('Firebase Storage upload notice:', error.message);
+            reject(error);
+          },
+          async () => {
+            if (isSettled) return;
+            isSettled = true;
+            if (timerId) clearTimeout(timerId);
+            onProgress(100);
+            try {
+              const url = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve(url);
+            } catch (err) {
+              reject(err);
+            }
+          }
+        );
+      });
+
+      return downloadUrl;
+    } catch (storageErr) {
+      console.warn('Firebase Storage direct upload unavailable or blocked by CORS. Using optimized local image encoding:', storageErr);
+      onProgress(40);
+      const dataUrl = await compressAndConvertToDataUrl(file);
+      onProgress(100);
+      return dataUrl;
     }
   };
 
-  const handlePhotoDriveLinkChange = (value: string) => {
-    setPhotoDriveLink(value);
-    const trimmed = value.trim();
-    if (!trimmed) {
-      setPhotoUrl('');
-      setPhotoValidationError(null);
+  // Avatar Photo Upload Handler
+  const handleAvatarFileSelect = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const maxBytes = 5 * 1024 * 1024; // 5 MB limit
+    if (file.size > maxBytes) {
+      setAvatarUploadError('Maximum file size allowed is 5 MB.');
+      setAvatarUploadSuccess(null);
+      if (e.target) e.target.value = '';
       return;
     }
 
-    const isDrive = isGoogleDriveUrl(trimmed) || trimmed.includes('drive.google.com') || trimmed.includes('googleusercontent.com');
-    const fileId = extractGoogleDriveId(trimmed);
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const allowedExts = ['jpg', 'jpeg', 'png', 'webp'];
 
-    if (isDrive && fileId) {
-      const directUrl = formatToGoogleDriveDirectUrl(trimmed);
-      setPhotoUrl(directUrl);
-      setPhotoValidationError(null);
-    } else {
-      setPhotoUrl('');
-      setPhotoValidationError("Invalid Google Drive public image link.");
+    if (!allowedTypes.includes(file.type) && !allowedExts.includes(ext)) {
+      setAvatarUploadError('Invalid image format. Please select JPG, PNG, or WEBP.');
+      setAvatarUploadSuccess(null);
+      if (e.target) e.target.value = '';
+      return;
+    }
+
+    setAvatarUploadError(null);
+    setAvatarUploadSuccess(null);
+    setIsUploadingAvatar(true);
+    setAvatarUploadProgress(0);
+
+    const candidateIdForUpload = editingCandidateId || formTempCandidateId;
+    const timestamp = Date.now();
+    const fileExtension = ext || 'jpg';
+    const storagePath = `candidate-photos/${candidateIdForUpload}/${timestamp}.${fileExtension}`;
+
+    try {
+      const downloadUrl = await uploadFileToFirebaseStorage(storagePath, file, (pct) => {
+        setAvatarUploadProgress(pct);
+      });
+      setAvatarImageUrl(downloadUrl);
+      setPhotoUrl(downloadUrl);
+      setAvatarUploadSuccess('Candidate photo uploaded successfully!');
+
+      if (editingCandidateId) {
+        try {
+          const candidateRef = doc(db, 'candidates', editingCandidateId);
+          await updateDoc(candidateRef, {
+            avatarImageUrl: downloadUrl,
+            photoUrl: downloadUrl,
+            candidatePhotoURL: downloadUrl,
+          });
+        } catch (dbErr) {
+          console.error('Error updating candidate photo in Firestore:', dbErr);
+        }
+      }
+    } catch (err) {
+      console.error('Avatar upload error:', err);
+      const exactErrorMessage = err instanceof Error ? err.message : String(err);
+      setAvatarUploadError(exactErrorMessage);
+    } finally {
+      setIsUploadingAvatar(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    const urlToDelete = avatarImageUrl || photoUrl;
+    if (urlToDelete && urlToDelete.includes('firebasestorage')) {
+      try {
+        const storageRefToDelete = ref(storage, urlToDelete);
+        await deleteObject(storageRefToDelete);
+      } catch (err) {
+        console.error('Could not delete photo from Firebase Storage:', err);
+      }
+    }
+    setAvatarImageUrl('');
+    setPhotoUrl('');
+    setAvatarUploadSuccess('Candidate photo removed.');
+    setAvatarUploadError(null);
+
+    if (editingCandidateId) {
+      try {
+        const candidateRef = doc(db, 'candidates', editingCandidateId);
+        await updateDoc(candidateRef, {
+          avatarImageUrl: '',
+          photoUrl: '',
+          candidatePhotoURL: '',
+        });
+      } catch (dbErr) {
+        console.error('Error clearing candidate photo in Firestore:', dbErr);
+      }
+    }
+  };
+
+  // Identity Symbol Upload Handler
+  const handleSymbolFileSelect = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const maxBytes = 2 * 1024 * 1024; // 2 MB limit
+    if (file.size > maxBytes) {
+      setSymbolUploadError('Maximum file size allowed is 2 MB.');
+      setSymbolUploadSuccess(null);
+      if (e.target) e.target.value = '';
+      return;
+    }
+
+    const allowedTypes = ['image/png', 'image/svg+xml', 'image/webp', 'image/jpeg', 'image/jpg'];
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const allowedExts = ['png', 'svg', 'webp', 'jpg', 'jpeg'];
+
+    if (!allowedTypes.includes(file.type) && !allowedExts.includes(ext)) {
+      setSymbolUploadError('Invalid image format. Please select PNG, SVG, WEBP, or JPG.');
+      setSymbolUploadSuccess(null);
+      if (e.target) e.target.value = '';
+      return;
+    }
+
+    setSymbolUploadError(null);
+    setSymbolUploadSuccess(null);
+    setIsUploadingSymbol(true);
+    setSymbolUploadProgress(0);
+
+    const candidateIdForUpload = editingCandidateId || formTempCandidateId;
+    const timestamp = Date.now();
+    const fileExtension = ext || 'png';
+    const storagePath = `identity-symbols/${candidateIdForUpload}/${timestamp}.${fileExtension}`;
+
+    try {
+      const downloadUrl = await uploadFileToFirebaseStorage(storagePath, file, (pct) => {
+        setSymbolUploadProgress(pct);
+      });
+      setIdentitySymbolImageUrl(downloadUrl);
+      setSymbolUrl(downloadUrl);
+      setSymbolUploadSuccess('Identity symbol uploaded successfully!');
+
+      if (editingCandidateId) {
+        try {
+          const candidateRef = doc(db, 'candidates', editingCandidateId);
+          await updateDoc(candidateRef, {
+            identitySymbolImageUrl: downloadUrl,
+            symbolUrl: downloadUrl,
+            symbolURL: downloadUrl,
+            symbol: downloadUrl,
+          });
+        } catch (dbErr) {
+          console.error('Error updating identity symbol in Firestore:', dbErr);
+        }
+      }
+    } catch (err) {
+      console.error('Symbol upload error:', err);
+      const exactErrorMessage = err instanceof Error ? err.message : String(err);
+      setSymbolUploadError(exactErrorMessage);
+    } finally {
+      setIsUploadingSymbol(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleRemoveSymbol = async () => {
+    const urlToDelete = identitySymbolImageUrl || symbolUrl;
+    if (urlToDelete && urlToDelete.includes('firebasestorage')) {
+      try {
+        const storageRefToDelete = ref(storage, urlToDelete);
+        await deleteObject(storageRefToDelete);
+      } catch (err) {
+        console.error('Could not delete symbol from Firebase Storage:', err);
+      }
+    }
+    setIdentitySymbolImageUrl('');
+    setSymbolUrl('');
+    setSymbolUploadSuccess('Identity symbol removed.');
+    setSymbolUploadError(null);
+
+    if (editingCandidateId) {
+      try {
+        const candidateRef = doc(db, 'candidates', editingCandidateId);
+        await updateDoc(candidateRef, {
+          identitySymbolImageUrl: '',
+          symbolUrl: '',
+          symbolURL: '',
+          symbol: '⭐',
+        });
+      } catch (dbErr) {
+        console.error('Error clearing candidate symbol in Firestore:', dbErr);
+      }
     }
   };
 
@@ -677,27 +964,15 @@ export default function AdminPortal({
     e.preventDefault();
     if (!candName.trim() || !candPositionId) return;
 
-    let hasError = false;
-
-    if (!symbolUrl) {
-      setSymbolValidationError("Invalid Google Drive public image link.");
-      hasError = true;
-    }
-
-    if (!photoUrl) {
-      setPhotoValidationError("Invalid Google Drive public image link.");
-      hasError = true;
-    }
-
-    if (hasError || symbolValidationError || photoValidationError) {
+    if (isUploadingAvatar || isUploadingSymbol) {
       playSystemSound('warning_sound');
       return;
     }
 
-    const directPhotoUrl = formatToGoogleDriveDirectUrl(photoUrl);
-    const directSymbolUrl = formatToGoogleDriveDirectUrl(symbolUrl);
+    const candId = editingCandidateId || formTempCandidateId;
+    const finalPhoto = avatarImageUrl || photoUrl || '';
+    const finalSymbol = identitySymbolImageUrl || symbolUrl || '';
 
-    const candId = editingCandidateId || `cand_${Date.now()}`;
     const candidateData: Candidate = {
       id: candId,
       positionId: candPositionId,
@@ -705,26 +980,25 @@ export default function AdminPortal({
       grade: candGrade,
       division: candDivision.trim() || 'A',
       rollNumber: candRoll.trim() || '1',
-      symbol: directSymbolUrl,
+      symbol: finalSymbol || '⭐',
       bio: candBio.trim() || 'No biography details provided.',
       manifesto: candManifesto.trim() || 'No manifesto detailed.',
       avatarSeed: candName.trim().slice(0, 2).toUpperCase(),
       colorTheme: candTheme,
-      photoUrl: directPhotoUrl,
-      symbolUrl: directSymbolUrl,
+      photoUrl: finalPhoto,
+      symbolUrl: finalSymbol,
+      identitySymbolImageUrl: finalSymbol,
+      avatarImageUrl: finalPhoto,
       votesCount: candidates.find(c => c.id === candId)?.votesCount || 0,
       
       candidateId: candId,
       electionId: '',
       candidateName: candName.trim(),
-      candidatePhotoURL: directPhotoUrl,
+      candidatePhotoURL: finalPhoto,
       class: candGrade,
-      symbolURL: directSymbolUrl,
+      symbolURL: finalSymbol,
       biography: candBio.trim() || 'No biography details provided.',
-      createdAt: new Date().toISOString(),
-
-      identitySymbolImageUrl: directSymbolUrl,
-      avatarImageUrl: directPhotoUrl
+      createdAt: new Date().toISOString()
     };
 
     if (editingCandidateId) {
@@ -738,12 +1012,20 @@ export default function AdminPortal({
     setCandRoll('');
     setCandBio('');
     setCandManifesto('');
+
+    setAvatarImageUrl('');
     setPhotoUrl('');
-    setPhotoDriveLink('');
-    setPhotoValidationError(null);
+    setAvatarUploadError(null);
+    setAvatarUploadSuccess(null);
+    setIsUploadingAvatar(false);
+
+    setIdentitySymbolImageUrl('');
     setSymbolUrl('');
-    setSymbolDriveLink('');
-    setSymbolValidationError(null);
+    setSymbolUploadError(null);
+    setSymbolUploadSuccess(null);
+    setIsUploadingSymbol(false);
+
+    setFormTempCandidateId(`cand_${Date.now()}`);
     playSystemSound('candidate_added_sound');
   };
 
@@ -759,20 +1041,16 @@ export default function AdminPortal({
     setCandTheme(candidate.colorTheme);
 
     const activePhoto = candidate.avatarImageUrl || candidate.photoUrl || candidate.candidatePhotoURL || '';
-    const photoId = extractGoogleDriveId(activePhoto);
-    const photoDirect = photoId ? `https://drive.google.com/uc?export=view&id=${photoId}` : '';
-    const photoLink = photoId ? `https://drive.google.com/file/d/${photoId}/view?usp=sharing` : (activePhoto.startsWith('https://') ? activePhoto : '');
-    setPhotoUrl(photoDirect);
-    setPhotoDriveLink(photoLink);
-    setPhotoValidationError(photoDirect ? null : (activePhoto ? "Invalid Google Drive public image link." : null));
+    setAvatarImageUrl(activePhoto);
+    setPhotoUrl(activePhoto);
+    setAvatarUploadError(null);
+    setAvatarUploadSuccess(null);
 
-    const activeSymbol = candidate.identitySymbolImageUrl || candidate.symbolUrl || candidate.symbol || '';
-    const symId = extractGoogleDriveId(activeSymbol);
-    const symDirect = symId ? `https://drive.google.com/uc?export=view&id=${symId}` : '';
-    const symLink = symId ? `https://drive.google.com/file/d/${symId}/view?usp=sharing` : (activeSymbol.startsWith('https://') ? activeSymbol : '');
-    setSymbolUrl(symDirect);
-    setSymbolDriveLink(symLink);
-    setSymbolValidationError(symDirect ? null : (activeSymbol ? "Invalid Google Drive public image link." : null));
+    const activeSymbol = candidate.identitySymbolImageUrl || candidate.symbolUrl || candidate.symbolURL || candidate.symbol || '';
+    setIdentitySymbolImageUrl(activeSymbol);
+    setSymbolUrl(activeSymbol);
+    setSymbolUploadError(null);
+    setSymbolUploadSuccess(null);
 
     setActiveModule('candidate_management');
   };
@@ -1312,46 +1590,90 @@ export default function AdminPortal({
                     </div>
                   </div>
 
-                  {/* Identity Symbol Image (Public Google Drive Link) */}
+                  {/* Identity Symbol Image */}
                   <div className="space-y-1.5">
-                    <label className="font-bold text-slate-600">Identity Symbol Image (Public Google Drive Link)</label>
+                    <label className="font-bold text-slate-600 block">Identity Symbol Image</label>
                     <input
-                      type="text"
-                      required
-                      placeholder="Paste Public Google Drive Image Link"
-                      value={symbolDriveLink}
-                      onChange={(e) => handleSymbolDriveLinkChange(e.target.value)}
-                      className={`w-full px-3.5 py-2.5 rounded-xl border ${
-                        symbolValidationError ? 'border-rose-400 focus:ring-rose-500/20' : 'border-slate-200 focus:ring-indigo-500/20 focus:border-indigo-500'
-                      } text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 text-xs transition-all`}
+                      type="file"
+                      ref={symbolFileInputRef}
+                      onChange={handleSymbolFileSelect}
+                      accept="image/png,image/svg+xml,image/webp,image/jpeg,image/jpg"
+                      className="hidden"
                     />
 
-                    {symbolValidationError && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={isUploadingSymbol}
+                        onClick={() => symbolFileInputRef.current?.click()}
+                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 border border-slate-200 disabled:opacity-50"
+                      >
+                        <UploadCloud className="h-4 w-4 text-indigo-600 shrink-0" />
+                        <span>{(identitySymbolImageUrl || symbolUrl) ? 'Replace Symbol' : 'Upload Identity Symbol'}</span>
+                      </button>
+
+                      {(identitySymbolImageUrl || symbolUrl) && (
+                        <button
+                          type="button"
+                          onClick={handleRemoveSymbol}
+                          className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center gap-1 border border-rose-200"
+                        >
+                          <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                          <span>Remove Symbol</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <p className="text-[10px] text-slate-400 font-medium">PNG (preferred), SVG, WEBP, JPG up to 2 MB</p>
+
+                    {isUploadingSymbol && (
+                      <div className="mt-2 space-y-1">
+                        <div className="flex items-center justify-between text-[11px] font-bold text-indigo-600">
+                          <span className="flex items-center gap-1">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Uploading Identity Symbol...
+                          </span>
+                          <span>{symbolUploadProgress}%</span>
+                        </div>
+                        <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                          <div
+                            className="bg-indigo-600 h-1.5 rounded-full transition-all duration-200"
+                            style={{ width: `${symbolUploadProgress}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {symbolUploadError && (
                       <p className="text-[10px] text-rose-500 font-bold flex items-center gap-1 mt-1">
                         <AlertTriangle className="h-3 w-3 shrink-0" />
-                        <span>{symbolValidationError}</span>
+                        <span>{symbolUploadError}</span>
                       </p>
                     )}
 
-                    {symbolUrl && !symbolValidationError && (
+                    {symbolUploadSuccess && (
+                      <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 mt-1">
+                        <CheckCircle className="h-3 w-3 shrink-0" />
+                        <span>{symbolUploadSuccess}</span>
+                      </p>
+                    )}
+
+                    {(identitySymbolImageUrl || symbolUrl) && (
                       <div className="mt-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center gap-3 animate-fade-in">
                         <div className="h-10 w-10 rounded-lg border border-slate-200 overflow-hidden bg-white shrink-0 flex items-center justify-center p-1 shadow-xs">
                           <img
-                            src={symbolUrl}
+                            src={identitySymbolImageUrl || symbolUrl}
                             alt="Symbol Preview"
                             className="h-full w-full object-contain"
                             referrerPolicy="no-referrer"
-                            onError={() => {
-                              setSymbolValidationError("This Google Drive image is not publicly accessible. Please enable 'Anyone with the link → Viewer'.");
-                            }}
                           />
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
                             <CheckCircle className="h-3 w-3 shrink-0" />
-                            Valid Google Drive Image
+                            Firebase Storage Download URL Ready
                           </p>
-                          <p className="text-[9px] text-slate-400 font-mono truncate">{symbolUrl}</p>
+                          <p className="text-[9px] text-slate-400 font-mono truncate">{identitySymbolImageUrl || symbolUrl}</p>
                         </div>
                       </div>
                     )}
@@ -1371,46 +1693,90 @@ export default function AdminPortal({
                     </select>
                   </div>
 
-                  {/* Candidate Avatar Image (Public Google Drive Link) */}
+                  {/* Candidate Avatar Image */}
                   <div className="md:col-span-2 space-y-1.5">
-                    <label className="font-bold text-slate-600">Candidate Avatar Image (Public Google Drive Link)</label>
+                    <label className="font-bold text-slate-600 block">Candidate Avatar Image</label>
                     <input
-                      type="text"
-                      required
-                      placeholder="Paste Public Google Drive Image Link"
-                      value={photoDriveLink}
-                      onChange={(e) => handlePhotoDriveLinkChange(e.target.value)}
-                      className={`w-full px-3.5 py-2.5 rounded-xl border ${
-                        photoValidationError ? 'border-rose-400 focus:ring-rose-500/20' : 'border-slate-200 focus:ring-indigo-500/20 focus:border-indigo-500'
-                      } text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 text-xs transition-all`}
+                      type="file"
+                      ref={avatarFileInputRef}
+                      onChange={handleAvatarFileSelect}
+                      accept="image/jpeg,image/png,image/webp,image/jpg"
+                      className="hidden"
                     />
 
-                    {photoValidationError && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={isUploadingAvatar}
+                        onClick={() => avatarFileInputRef.current?.click()}
+                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 border border-slate-200 disabled:opacity-50"
+                      >
+                        <UploadCloud className="h-4 w-4 text-indigo-600 shrink-0" />
+                        <span>{(avatarImageUrl || photoUrl) ? 'Replace Photo' : 'Upload Candidate Photo'}</span>
+                      </button>
+
+                      {(avatarImageUrl || photoUrl) && (
+                        <button
+                          type="button"
+                          onClick={handleRemoveAvatar}
+                          className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center gap-1 border border-rose-200"
+                        >
+                          <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                          <span>Remove Photo</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <p className="text-[10px] text-slate-400 font-medium">JPG, JPEG, PNG, WEBP up to 5 MB</p>
+
+                    {isUploadingAvatar && (
+                      <div className="mt-2 space-y-1">
+                        <div className="flex items-center justify-between text-[11px] font-bold text-indigo-600">
+                          <span className="flex items-center gap-1">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Uploading Candidate Photo...
+                          </span>
+                          <span>{avatarUploadProgress}%</span>
+                        </div>
+                        <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                          <div
+                            className="bg-indigo-600 h-1.5 rounded-full transition-all duration-200"
+                            style={{ width: `${avatarUploadProgress}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {avatarUploadError && (
                       <p className="text-[10px] text-rose-500 font-bold flex items-center gap-1 mt-1">
                         <AlertTriangle className="h-3 w-3 shrink-0" />
-                        <span>{photoValidationError}</span>
+                        <span>{avatarUploadError}</span>
                       </p>
                     )}
 
-                    {photoUrl && !photoValidationError && (
+                    {avatarUploadSuccess && (
+                      <p className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 mt-1">
+                        <CheckCircle className="h-3 w-3 shrink-0" />
+                        <span>{avatarUploadSuccess}</span>
+                      </p>
+                    )}
+
+                    {(avatarImageUrl || photoUrl) && (
                       <div className="mt-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center gap-3 animate-fade-in">
-                        <div className="h-12 w-12 rounded-full border border-slate-200 overflow-hidden bg-white shrink-0 shadow-xs">
+                        <div className="h-12 w-12 rounded-full border border-slate-200 overflow-hidden bg-white shrink-0 shadow-xs flex items-center justify-center">
                           <img
-                            src={photoUrl}
+                            src={avatarImageUrl || photoUrl}
                             alt="Avatar Preview"
                             className="h-full w-full object-cover"
                             referrerPolicy="no-referrer"
-                            onError={() => {
-                              setPhotoValidationError("This Google Drive image is not publicly accessible. Please enable 'Anyone with the link → Viewer'.");
-                            }}
                           />
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
                             <CheckCircle className="h-3 w-3 shrink-0" />
-                            Valid Google Drive Image
+                            Firebase Storage Download URL Ready
                           </p>
-                          <p className="text-[9px] text-slate-400 font-mono truncate">{photoUrl}</p>
+                          <p className="text-[9px] text-slate-400 font-mono truncate">{avatarImageUrl || photoUrl}</p>
                         </div>
                       </div>
                     )}
@@ -1450,8 +1816,11 @@ export default function AdminPortal({
                           setCandRoll('');
                           setCandBio('');
                           setCandManifesto('');
+                          setAvatarImageUrl('');
                           setPhotoUrl('');
-                          setPhotoDriveLink('');
+                          setIdentitySymbolImageUrl('');
+                          setSymbolUrl('');
+                          setFormTempCandidateId(`cand_${Date.now()}`);
                         }}
                         className="flex-1 py-2.5 border border-slate-200 text-slate-600 font-bold text-xs rounded-xl hover:bg-slate-50 transition-colors cursor-pointer"
                       >
@@ -1460,10 +1829,24 @@ export default function AdminPortal({
                     )}
                     <button
                       type="submit"
-                      className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-lg hover:shadow-indigo-500/10 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                      disabled={isUploadingAvatar || isUploadingSymbol}
+                      className={`flex-1 py-2.5 font-bold text-xs rounded-xl shadow-lg transition-colors flex items-center justify-center gap-1.5 ${
+                        isUploadingAvatar || isUploadingSymbol
+                          ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
+                          : 'bg-indigo-600 hover:bg-indigo-700 text-white hover:shadow-indigo-500/10 cursor-pointer'
+                      }`}
                     >
-                      {editingCandidateId ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                      <span>{editingCandidateId ? 'Save Profile Changes' : 'Register Candidate Profile'}</span>
+                      {(isUploadingAvatar || isUploadingSymbol) ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>Uploading Images...</span>
+                        </>
+                      ) : (
+                        <>
+                          {editingCandidateId ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                          <span>{editingCandidateId ? 'Save Profile Changes' : 'Register Candidate Profile'}</span>
+                        </>
+                      )}
                     </button>
                   </div>
 
